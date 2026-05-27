@@ -1,0 +1,5 @@
+flask
+pdfplumber
+openpyxl
+python-dotenv
+pdfminer.six
