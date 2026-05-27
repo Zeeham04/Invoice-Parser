@@ -38,6 +38,7 @@ def extract_text_from_pdf(data: bytes, filename: str = "") -> tuple[str, str | N
                     chunks.append(t)
     except Exception as e:
         logger.warning("pdfplumber failed for %s: %s", filename, e)
+        print(f"pdfplumber failed for {filename}: {e}", flush=True)
 
     text = "\n".join(chunks)
 
@@ -50,6 +51,7 @@ def extract_text_from_pdf(data: bytes, filename: str = "") -> tuple[str, str | N
                 text = alt
         except Exception as e:
             logger.warning("pdfminer fallback failed for %s: %s", filename, e)
+            print(f"pdfminer fallback failed for {filename}: {e}", flush=True)
 
     if len(text.strip()) < MIN_TEXT_CHARS:
         err = (
