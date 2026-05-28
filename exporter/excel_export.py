@@ -232,6 +232,19 @@ def _parse_date_for_sort(s: str) -> datetime:
         return datetime.min
 
 
+def _fmt_date_str(val: Any) -> str:
+    """Return 'Month DD, YYYY' plain string (zero-padded day, e.g. 'April 07, 2026')."""
+    if val is None or val == "":
+        return ""
+    if isinstance(val, datetime):
+        return val.strftime("%B %d, %Y")
+    raw = str(val).strip()
+    if not raw:
+        return ""
+    dt = _parse_date_for_sort(raw)
+    return dt.strftime("%B %d, %Y") if dt != datetime.min else raw
+
+
 def _to_date(val: Any) -> datetime | str | None:
     if val is None or val == "":
         return None
@@ -344,29 +357,6 @@ def build_workbook_bytes(
 ) -> bytes:
     """Full detail workbook: one sheet named Invoices with invoice, shipment, and adjustment rows."""
 
-    def _parse_full_detail_datetime(value: Any) -> datetime | None:
-        if isinstance(value, datetime):
-            return value
-        if value is None:
-            return None
-        raw = str(value).strip()
-        if not raw:
-            return None
-        for fmt in (
-            "%B %d, %Y",
-            "%B %d %Y",
-            "%b %d, %Y",
-            "%b %d %Y",
-            "%m/%d/%Y",
-            "%m/%d/%y",
-            "%Y-%m-%d",
-        ):
-            try:
-                return datetime.strptime(raw, fmt)
-            except ValueError:
-                continue
-        return None
-
     def _as_float(value: Any) -> float | None:
         if value is None or value == "":
             return None
@@ -388,11 +378,11 @@ def build_workbook_bytes(
         row[0] = "Invoice"
         row[1] = _as_str(invoice.get("Invoice Number"))
         row[2] = _as_str(invoice.get("Account Number"))
-        row[3] = _as_float(invoice.get("Amount Due")) or 0.0
-        row[4] = _parse_full_detail_datetime(invoice.get("Invoice Date"))
-        row[5] = _parse_full_detail_datetime(invoice.get("Due Date"))
+        row[3] = "$0.00"
+        row[4] = _fmt_date_str(invoice.get("Invoice Date"))
+        row[5] = _fmt_date_str(invoice.get("Due Date"))
         payment_status = _as_str(invoice.get("Payment Status")) or "Accepted"
-        row[6] = "Closed" if payment_status == "Accepted" else _as_str(invoice.get("Invoice Status"))
+        row[6] = "Closed "
         row[7] = payment_status
         row[8] = _as_float(invoice.get("Subtotal"))
         row[9] = _as_float(invoice.get("Tax")) or 0.0
@@ -476,10 +466,10 @@ def build_workbook_bytes(
             cell = ws.cell(row=row_idx, column=col_idx, value=value)
             if col_idx == 1:
                 cell.font = FULL_DETAIL_BLACK_FONT
-            if col_idx in FULL_DETAIL_CURRENCY_COLS and isinstance(value, (int, float)):
-                    cell.number_format = FULL_DETAIL_CURRENCY_FMT
-            elif col_idx in FULL_DETAIL_DATE_COLS and isinstance(value, datetime):
-                    cell.number_format = FULL_DETAIL_DATE_FMT
+            if col_idx == 2:
+                cell.number_format = '@'
+            elif col_idx in FULL_DETAIL_CURRENCY_COLS and isinstance(value, (int, float)):
+                cell.number_format = FULL_DETAIL_CURRENCY_FMT
         row_idx += 1
 
         inv_no = str(invoice.get("Invoice Number") or "").strip()
@@ -545,18 +535,6 @@ def build_summary_workbook_bytes(
         cell.font = Font(bold=True, size=12)
         ws.column_dimensions[get_column_letter(col_idx)].width = widths[col_idx - 1]
 
-    def _fmt_date(val: Any) -> str:
-        """Return 'Month DD, YYYY' plain string with zero-padded day."""
-        if val is None or val == "":
-            return ""
-        if isinstance(val, datetime):
-            return val.strftime("%B %d, %Y")
-        raw = str(val).strip()
-        if not raw:
-            return ""
-        dt = _parse_date_for_sort(raw)
-        return dt.strftime("%B %d, %Y") if dt != datetime.min else raw
-
     def _safe_float(val: Any) -> float:
         if val in (None, ""):
             return 0.0
@@ -590,20 +568,22 @@ def build_summary_workbook_bytes(
             invoice_number,                         # A=1  plain string, preserves leading zeros
             account_number,                         # B=2
             "$0.00",                                # C=3  plain string
-            _fmt_date(inv.get("Invoice Date")),     # D=4  plain string "Month DD, YYYY"
+            _fmt_date_str(inv.get("Invoice Date")),     # D=4  plain string "Month DD, YYYY"
             "Closed ",                              # E=5  always (trailing space per spec)
             "Accepted",                             # F=6  always
             f"=J{row_idx}-I{row_idx}-H{row_idx}",  # G=7  Billed - GovtChg - Tax
             tax,                                    # H=8
             govt_charges,                           # I=9
             billed,                                 # J=10
-            _fmt_date(inv.get("Due Date")),         # K=11 plain string "Month DD, YYYY"
+            _fmt_date_str(inv.get("Due Date")),         # K=11 plain string "Month DD, YYYY"
             inv_type,                               # L=12
         ]
 
         for c, value in enumerate(row_values, start=1):
             cell = ws.cell(row=row_idx, column=c, value=value)
-            if c in CURRENCY_COLS:
+            if c == 1:
+                cell.number_format = '@'
+            elif c in CURRENCY_COLS:
                 cell.number_format = ACCT_FMT
 
     # N = index of last data row (header=1, data rows 2..N)
