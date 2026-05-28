@@ -65,7 +65,6 @@ class UPSImportParser(BaseInvoiceParser):
         for _pat in (
             r"Total\s+Government\s+Charges?\s+CAD\s+([\d,]+\.\d{2})",
             r"Total\s+Government\s+Charges?\s+([\d,]+\.\d{2})",
-            r"Government\s+Charges?\s+([\d,]+\.\d{2})",
         ):
             m = re.search(_pat, flat, re.I)
             if m:

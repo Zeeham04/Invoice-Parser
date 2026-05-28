@@ -376,8 +376,7 @@ def build_workbook_bytes(
     def _build_invoice_row(invoice: dict[str, Any]) -> list[Any]:
         row = [None] * len(FULL_DETAIL_HEADERS)
         row[0] = "Invoice"
-        _raw_inv = str(invoice.get("Invoice Number") or "").strip()
-        row[1] = (_raw_inv.zfill(15) if _raw_inv.isdigit() and len(_raw_inv) < 15 else _raw_inv) or None
+        row[1] = str(invoice.get("Invoice Number") or "").strip() or None
         row[2] = _as_str(invoice.get("Account Number"))
         row[3] = "$0.00"
         row[4] = _fmt_date_str(invoice.get("Invoice Date"))
@@ -512,6 +511,7 @@ def build_summary_workbook_bytes(
     CURRENCY_COLS = {7, 8, 9, 10}  # G H I J
 
     wb = Workbook()
+    wb.calculation.fullCalcOnLoad = True
     ws = wb.active
     ws.title = "Sheet1"
 
@@ -554,8 +554,7 @@ def build_summary_workbook_bytes(
     rows_by_account: dict[str, list[int]] = {}
 
     for row_idx, inv in enumerate(sorted_inv, start=2):
-        _raw_inv = str(inv.get("Invoice Number") or "").strip()
-        invoice_number = _raw_inv.zfill(15) if _raw_inv.isdigit() and len(_raw_inv) < 15 else _raw_inv
+        invoice_number = str(inv.get("Invoice Number") or "").strip()
         account_number = str(inv.get("Account Number") or "")
         inv_type = str(inv.get("Type") or "")
         is_import = "import" in inv_type.lower()
