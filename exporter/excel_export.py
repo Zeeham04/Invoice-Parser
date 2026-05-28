@@ -32,10 +32,6 @@ FULL_DETAIL_HEADERS: list[str] = [
     "Invoice Adjustments (total)",
     "Explanation",
     "Incentive Savings",
-    "Amount Outstanding",
-    "GST Registration #",
-    "Amount Outstanding (prior)",
-    "Total Amount Outstanding",
     "Pickup Date",
     "Order Date",
     "Tracking Number",
@@ -88,10 +84,6 @@ FULL_DETAIL_WIDTHS: list[float] = [
     29,
     40,
     19,
-    20,
-    12,
-    28,
-    26,
     13,
     12,
     20,
@@ -126,7 +118,7 @@ FULL_DETAIL_WIDTHS: list[float] = [
     40,
 ]
 
-FULL_DETAIL_CURRENCY_COLS = {4, 9, 10, 11, 12, 14, 15, 17, 18, 20, 21, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 50}
+FULL_DETAIL_CURRENCY_COLS = {4, 9, 10, 11, 12, 14, 15, 17, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 46}
 FULL_DETAIL_DATE_COLS = {5, 6}
 FULL_DETAIL_CURRENCY_FMT = r'\$#,##0.00'
 FULL_DETAIL_DATE_FMT = r'mmm\ dd\,\ yyyy'
@@ -181,10 +173,6 @@ INVOICE_DETAIL_COLS: list[ColSpec] = [
     ("Invoice Adjustments (total)", "Adjustments", True, False, 22),
     ("Explanation", "Explanation", False, False, 40),
     ("Incentive Savings", "Incentive Savings", True, False, 16),
-    ("Amount Outstanding", "Amount Outstanding", True, False, 18),
-    ("GST Registration #", "GST Registration #", False, False, 18),
-    ("Amount Outstanding (prior)", "Amount Outstanding Prior Invoices", True, False, 22),
-    ("Total Amount Outstanding", "Total Amount Outstanding", True, False, 22),
 ]
 
 SHIPMENT_DETAIL_COLS: list[ColSpec] = [
@@ -426,8 +414,9 @@ def build_workbook_bytes(
         row[3] = _as_float(invoice.get("Amount Due")) or 0.0
         row[4] = _parse_full_detail_datetime(invoice.get("Invoice Date"))
         row[5] = _parse_full_detail_datetime(invoice.get("Due Date"))
-        row[6] = _as_str(invoice.get("Invoice Status"))
-        row[7] = _as_str(invoice.get("Payment Status")) or "Accepted"
+        payment_status = _as_str(invoice.get("Payment Status")) or "Accepted"
+        row[6] = "Closed" if payment_status == "Accepted" else _as_str(invoice.get("Invoice Status"))
+        row[7] = payment_status
         row[8] = _as_float(invoice.get("Subtotal"))
         row[9] = _as_float(invoice.get("Tax")) or 0.0
         row[10] = _as_float(invoice.get("Government Charges"))
@@ -437,52 +426,48 @@ def build_workbook_bytes(
         row[14] = _as_float(invoice.get("Adjustments"))
         row[15] = _as_str(invoice.get("Explanation"))
         row[16] = _as_float(invoice.get("Incentive Savings"))
-        row[17] = _as_float(invoice.get("Amount Outstanding"))
-        row[18] = _as_str(invoice.get("GST Registration #"))
-        row[19] = _as_float(invoice.get("Amount Outstanding Prior Invoices"))
-        row[20] = _as_float(invoice.get("Total Amount Outstanding"))
         return row
 
     def _build_shipment_row(invoice: dict[str, Any], shipment: dict[str, Any]) -> list[Any]:
         row = _build_invoice_row(invoice)
         row[0] = "Shipment"
-        row[21] = _as_str(shipment.get("Pickup Date"))
-        row[22] = _as_str(shipment.get("Order Date"))
-        row[23] = _as_str(shipment.get("Tracking Number"))
-        row[24] = _as_str(shipment.get("Service Type"))
-        row[25] = _as_str(shipment.get("Postal Code") or shipment.get("Destination Postal Code"))
-        row[26] = _as_str(shipment.get("Zone"))
-        row[27] = _as_float(shipment.get("Weight (lbs)"))
-        row[28] = _as_float(shipment.get("Published Charge"))
-        row[29] = _as_float(shipment.get("Incentive Credit"))
-        row[30] = _as_float(shipment.get("Billed Charge"))
-        row[31] = _as_float(shipment.get("Fuel Surcharge"))
-        row[32] = _as_float(shipment.get("Declared Value"))
-        row[33] = _as_float(shipment.get("Surge Fee"))
-        row[34] = _as_float(shipment.get("Add'l Handling"))
-        row[35] = _as_float(shipment.get("Demand Surcharge"))
-        row[36] = _as_float(shipment.get("Residential Surcharge"))
-        row[37] = _as_float(shipment.get("Delivery Area Surcharge"))
-        row[38] = _as_str(shipment.get("SO#"))
-        row[39] = _as_str(shipment.get("PO#"))
-        row[40] = _as_str(shipment.get("Sender Name"))
-        row[41] = _as_str(shipment.get("Sender Company"))
-        row[42] = _as_str(shipment.get("Receiver Name"))
-        row[43] = _as_str(shipment.get("Receiver Company"))
-        row[44] = _as_str(shipment.get("Receiver City/Province"))
-        row[45] = _as_str(shipment.get("UserID"))
+        row[17] = _as_str(shipment.get("Pickup Date"))
+        row[18] = _as_str(shipment.get("Order Date"))
+        row[19] = _as_str(shipment.get("Tracking Number"))
+        row[20] = _as_str(shipment.get("Service Type"))
+        row[21] = _as_str(shipment.get("Postal Code") or shipment.get("Destination Postal Code"))
+        row[22] = _as_str(shipment.get("Zone"))
+        row[23] = _as_float(shipment.get("Weight (lbs)"))
+        row[24] = _as_float(shipment.get("Published Charge"))
+        row[25] = _as_float(shipment.get("Incentive Credit"))
+        row[26] = _as_float(shipment.get("Billed Charge"))
+        row[27] = _as_float(shipment.get("Fuel Surcharge"))
+        row[28] = _as_float(shipment.get("Declared Value"))
+        row[29] = _as_float(shipment.get("Surge Fee"))
+        row[30] = _as_float(shipment.get("Add'l Handling"))
+        row[31] = _as_float(shipment.get("Demand Surcharge"))
+        row[32] = _as_float(shipment.get("Residential Surcharge"))
+        row[33] = _as_float(shipment.get("Delivery Area Surcharge"))
+        row[34] = _as_str(shipment.get("SO#"))
+        row[35] = _as_str(shipment.get("PO#"))
+        row[36] = _as_str(shipment.get("Sender Name"))
+        row[37] = _as_str(shipment.get("Sender Company"))
+        row[38] = _as_str(shipment.get("Receiver Name"))
+        row[39] = _as_str(shipment.get("Receiver Company"))
+        row[40] = _as_str(shipment.get("Receiver City/Province"))
+        row[41] = _as_str(shipment.get("UserID"))
         return row
 
     def _build_adjustment_row(invoice: dict[str, Any], adjustment: dict[str, Any]) -> list[Any]:
         row = _build_invoice_row(invoice)
         row[0] = "Adjustment"
-        row[46] = _as_str(adjustment.get("Pickup Date"))
-        row[47] = _as_str(adjustment.get("Tracking Number"))
-        row[48] = _as_str(adjustment.get("Adjustment Type"))
-        row[49] = _as_float(adjustment.get("Adjustment Amount"))
-        row[50] = _as_str(adjustment.get("SO#"))
-        row[51] = _as_str(adjustment.get("PO#"))
-        row[52] = _as_str(adjustment.get("Description / Reason") or adjustment.get("Adjustment Description"))
+        row[42] = _as_str(adjustment.get("Pickup Date"))
+        row[43] = _as_str(adjustment.get("Tracking Number"))
+        row[44] = _as_str(adjustment.get("Adjustment Type"))
+        row[45] = _as_float(adjustment.get("Adjustment Amount"))
+        row[46] = _as_str(adjustment.get("SO#"))
+        row[47] = _as_str(adjustment.get("PO#"))
+        row[48] = _as_str(adjustment.get("Description / Reason") or adjustment.get("Adjustment Description"))
         return row
 
     def _group_by_invoice(items: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:

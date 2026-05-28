@@ -3,3 +3,6 @@ pdfplumber
 openpyxl
 python-dotenv
 pdfminer.six
+pytesseract
+pdf2image
+Pillow

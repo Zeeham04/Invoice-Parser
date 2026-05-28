@@ -53,10 +53,29 @@ def extract_text_from_pdf(data: bytes, filename: str = "") -> tuple[str, str | N
             logger.warning("pdfminer fallback failed for %s: %s", filename, e)
             print(f"pdfminer fallback failed for {filename}: {e}", flush=True)
 
+    if len(text.strip()) < 50:
+        try:
+            from pdf2image import convert_from_bytes
+            import pytesseract
+
+            print(f"OCR fallback triggered for {filename}", flush=True)
+            images = convert_from_bytes(data, last_page=MAX_PAGES)
+            ocr_chunks: list[str] = []
+            for img in images:
+                page_text = pytesseract.image_to_string(img)
+                if page_text:
+                    ocr_chunks.append(page_text)
+            ocr_text = "\n".join(ocr_chunks)
+            if len(ocr_text.strip()) > len(text.strip()):
+                text = ocr_text
+        except Exception as e:
+            logger.warning("OCR fallback failed for %s: %s", filename, e)
+            print(f"OCR fallback failed for {filename}: {e}", flush=True)
+
     if len(text.strip()) < MIN_TEXT_CHARS:
         err = (
-            f"{filename or 'PDF'} has no selectable text (may be scanned images only). "
-            "Use OCR or export text from the source application."
+            f"{filename or 'PDF'} has no selectable text and OCR could not extract content. "
+            "The file may be a scanned image that is not machine-readable."
         )
 
     return text, err
