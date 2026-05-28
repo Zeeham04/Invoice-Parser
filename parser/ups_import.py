@@ -61,15 +61,29 @@ class UPSImportParser(BaseInvoiceParser):
         tax = None
 
         govt = None
-        m = re.search(
-            r"Total Customs Charges For Shipment\s+\S+\s+CAD\s+([\d,]+\.\d{2})",
-            text,
-            re.I,
-        )
-        if m:
-            v = _f(m.group(1))
-            if v and v > 0:
-                govt = v
+        # Pattern 1: "Government Charges   480.36" or "Total Government Charges  CAD 480.36"
+        for _pat in (
+            r"Total\s+Government\s+Charges?\s+CAD\s+([\d,]+\.\d{2})",
+            r"Total\s+Government\s+Charges?\s+([\d,]+\.\d{2})",
+            r"Government\s+Charges?\s+([\d,]+\.\d{2})",
+        ):
+            m = re.search(_pat, flat, re.I)
+            if m:
+                v = _f(m.group(1))
+                if v and v > 0:
+                    govt = v
+                    break
+        # Pattern 2 (fallback): per-shipment line from raw text
+        if govt is None:
+            m = re.search(
+                r"Total Customs Charges For Shipment\s+\S+\s+CAD\s+([\d,]+\.\d{2})",
+                text,
+                re.I,
+            )
+            if m:
+                v = _f(m.group(1))
+                if v and v > 0:
+                    govt = v
 
         if not inv_no:
             warnings.append(f"{filename}: Could not extract Invoice Number.")

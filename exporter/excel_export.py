@@ -376,7 +376,8 @@ def build_workbook_bytes(
     def _build_invoice_row(invoice: dict[str, Any]) -> list[Any]:
         row = [None] * len(FULL_DETAIL_HEADERS)
         row[0] = "Invoice"
-        row[1] = _as_str(invoice.get("Invoice Number"))
+        _raw_inv = str(invoice.get("Invoice Number") or "").strip()
+        row[1] = (_raw_inv.zfill(15) if _raw_inv.isdigit() and len(_raw_inv) < 15 else _raw_inv) or None
         row[2] = _as_str(invoice.get("Account Number"))
         row[3] = "$0.00"
         row[4] = _fmt_date_str(invoice.get("Invoice Date"))
@@ -479,10 +480,10 @@ def build_workbook_bytes(
                 cell = ws.cell(row=row_idx, column=col_idx, value=value)
                 if col_idx == 1:
                     cell.font = FULL_DETAIL_BLACK_FONT
-                if col_idx in FULL_DETAIL_CURRENCY_COLS and isinstance(value, (int, float)):
+                if col_idx == 2:
+                    cell.number_format = '@'
+                elif col_idx in FULL_DETAIL_CURRENCY_COLS and isinstance(value, (int, float)):
                     cell.number_format = FULL_DETAIL_CURRENCY_FMT
-                elif col_idx in FULL_DETAIL_DATE_COLS and isinstance(value, datetime):
-                    cell.number_format = FULL_DETAIL_DATE_FMT
             row_idx += 1
 
         for adjustment in adjustments_by_invoice.get(inv_no, []):
@@ -491,10 +492,10 @@ def build_workbook_bytes(
                 cell = ws.cell(row=row_idx, column=col_idx, value=value)
                 if col_idx == 1:
                     cell.font = FULL_DETAIL_BLACK_FONT
-                if col_idx in FULL_DETAIL_CURRENCY_COLS and isinstance(value, (int, float)):
+                if col_idx == 2:
+                    cell.number_format = '@'
+                elif col_idx in FULL_DETAIL_CURRENCY_COLS and isinstance(value, (int, float)):
                     cell.number_format = FULL_DETAIL_CURRENCY_FMT
-                elif col_idx in FULL_DETAIL_DATE_COLS and isinstance(value, datetime):
-                    cell.number_format = FULL_DETAIL_DATE_FMT
             row_idx += 1
 
     bio = io.BytesIO()
@@ -553,7 +554,8 @@ def build_summary_workbook_bytes(
     rows_by_account: dict[str, list[int]] = {}
 
     for row_idx, inv in enumerate(sorted_inv, start=2):
-        invoice_number = str(inv.get("Invoice Number") or "").strip()
+        _raw_inv = str(inv.get("Invoice Number") or "").strip()
+        invoice_number = _raw_inv.zfill(15) if _raw_inv.isdigit() and len(_raw_inv) < 15 else _raw_inv
         account_number = str(inv.get("Account Number") or "")
         inv_type = str(inv.get("Type") or "")
         is_import = "import" in inv_type.lower()
@@ -610,7 +612,7 @@ def build_summary_workbook_bytes(
         ws.cell(row=tr, column=6, value=acct_no).font = bold12
         for c in CURRENCY_COLS:
             col_ltr = get_column_letter(c)
-            formula = "=" + "+".join(f"{col_ltr}{r}" for r in row_indices)
+            formula = "=SUM(" + "+".join(f"{col_ltr}{r}" for r in row_indices) + ")"
             cell = ws.cell(row=tr, column=c, value=formula)
             cell.number_format = ACCT_FMT
             cell.font = bold12
