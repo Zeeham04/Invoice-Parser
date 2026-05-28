@@ -1,14 +1,15 @@
-"""UPS Delivery Service Invoice (Domestic/Export) parsing."""
+"""UPS Delivery Service Invoice (Domestic/Export) parsing — TYPE_A."""
 
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Any
 
 from .base_parser import BaseInvoiceParser, ParseResult
 
 
-# ── Shared helpers ────────────────────────────────────────────────────────────
+# ── Shared helpers (imported by ups_import.py) ─────────────────────────────────
 
 def _f(s) -> float | None:
     """Safe float; strips commas."""
@@ -20,13 +21,22 @@ def _f(s) -> float | None:
         return None
 
 
-def _find_so_po(text: str) -> tuple[str, str]:
-    """
-    Return (SO#XXXXX, PO#XXXXX) including the prefix.
-    Prefers values near a '1st ref:' / '2nd ref:' block.
-    """
-    so, po = "", ""
+def _norm_date(raw: str) -> str:
+    """Normalize any 'Month D(D), YYYY' string to 'Month DD, YYYY' (zero-padded day)."""
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    for fmt in ("%B %d, %Y", "%B %d %Y"):
+        try:
+            return datetime.strptime(raw, fmt).strftime("%B %d, %Y")
+        except ValueError:
+            continue
+    return raw
 
+
+def _find_so_po(text: str) -> tuple[str, str]:
+    """Return (SO#XXXXX, PO#XXXXX) including prefix, preferring 1st/2nd ref blocks."""
+    so, po = "", ""
     for block in re.findall(r"(?:1st|2nd)\s*ref:\s*([^\n]+)", text, re.IGNORECASE):
         sm = re.search(r"\b(SO#\d+)\b", block, re.IGNORECASE)
         pm = re.search(r"\b(PO#[\w\-/\.]+)", block, re.IGNORECASE)
@@ -34,40 +44,35 @@ def _find_so_po(text: str) -> tuple[str, str]:
             so = sm.group(1).upper()
         if pm:
             po = pm.group(1).upper()
-
     if not so:
         for m in re.finditer(r"\b(SO#\d+)\b", text, re.IGNORECASE):
             so = m.group(1).upper()
     if not po:
         for m in re.finditer(r"\b(PO#[\w\-/\.]+)", text, re.IGNORECASE):
             po = m.group(1).upper()
-
     return so, po
 
 
-def _sum_total_taxes(text: str) -> float | None:
+# ── Tax extraction ─────────────────────────────────────────────────────────────
+
+def _extract_total_tax(text: str) -> float | None:
     """
-    UPS invoices have THREE types of 'Total Taxes' lines on the tax page:
+    Find Total Taxes using last-match strategy.
 
-        Total Taxes GST R105453328  48.73   ← per-type sub-entry, SKIP
-        Total Taxes HST R105453328   7.11   ← per-type sub-entry, SKIP
-        Total Taxes                 55.84   ← summary line — THIS is correct
+    'Total Taxes <amount>' (no GST/HST qualifier after Taxes) is the grand-total
+    summary line. Taking the last match handles invoices where sub-type lines
+    (Total Taxes GST ..., Total Taxes HST ...) appear first — those lines don't
+    match this pattern because the qualifier word follows before the number.
 
-    Strategy:
-        Pass 1 — find the summary line (no GST/HST/PST/QST after the label).
-        Pass 2 — sum individual sub-entries if no summary line exists.
+    Falls back to summing individual component lines, then a bare 'Tax $' pattern.
     """
-    for line in text.splitlines():
-        if not re.search(r"Total\s+Taxes?\b", line, re.IGNORECASE):
-            continue
-        if re.search(r"\b(GST|HST|PST|QST)\b", line, re.IGNORECASE):
-            continue
-        if re.search(r"\bR\d{7,}\b", line):
-            continue
-        m = re.search(r"([\d,]+\.\d{2})\s*$", line.strip())
-        if m:
-            return _f(m.group(1))
+    matches = []
+    for m in re.finditer(r"Total\s+Taxes?\s+([\d,]+\.\d{2})", text, re.IGNORECASE):
+        matches.append(_f(m.group(1)))
+    if matches:
+        return matches[-1]
 
+    # Fallback 1: sum GST + HST + PST + QST sub-lines
     components: dict[str, float] = {}
     for line in text.splitlines():
         for label, key in (
@@ -83,6 +88,7 @@ def _sum_total_taxes(text: str) -> float | None:
     if components:
         return round(sum(components.values()), 2)
 
+    # Fallback 2: bare 'Tax $X.XX'
     m = re.search(r"\bTax\s+\$\s*([\d,]+\.\d{2})", text, re.IGNORECASE)
     if m:
         return _f(m.group(1))
@@ -90,12 +96,10 @@ def _sum_total_taxes(text: str) -> float | None:
     return None
 
 
+# ── Shipment section helpers ────────────────────────────────────────────────────
+
 def _shipment_section_lines(lines: list[str]) -> list[tuple[int, str]]:
-    """
-    Return (line_index, line_text) only for lines inside an Outbound or
-    Inbound section. Stops when 'Adjustments & Other Charges', 'Service
-    Charges', or 'Tax' sections begin.
-    """
+    """Yield (line_index, line_text) only while inside Outbound/Inbound sections."""
     in_section = False
     result = []
     for i, line in enumerate(lines):
@@ -133,97 +137,82 @@ _PRIMARY_LINE = re.compile(
 )
 
 
+# ── Parser ─────────────────────────────────────────────────────────────────────
+
 class UPSDomesticParser(BaseInvoiceParser):
     carrier_name = "UPS Domestic/Export"
 
-    _INV_NO = re.compile(
-        r"Invoice\s+Number\s+([A-Z0-9]{6,})",
-        re.IGNORECASE,
-    )
-
-    _ACCOUNT = re.compile(
-        r"^Account\s+Number\s+([A-Z0-9]{4,12})",
-        re.IGNORECASE | re.MULTILINE,
-    )
-
-    _MONTH = (
-        r"(?:January|February|March|April|May|June|July|August|"
-        r"September|October|November|December|"
-        r"Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
-    )
-    _DATE_LONG = rf"({_MONTH}\s+\d{{1,2}},?\s*\d{{4}})"
-
-    _DATE = re.compile(rf"Invoice\s+Date\s+{_DATE_LONG}", re.IGNORECASE)
-    _DUE = re.compile(rf"Invoice\s+Due\s+Date\s+{_DATE_LONG}", re.IGNORECASE)
-
-    _TRACK = re.compile(r"\b(1Z[0-9A-Z]{16})\b")
-
     def parse(self, text: str, filename: str) -> ParseResult:
         warnings: list[str] = []
+        flat = re.sub(r"\s+", " ", text)
 
+        # Invoice number — exact string from PDF, no reformatting
         inv_no = ""
-        m = self._INV_NO.search(text)
+        m = re.search(r"Invoice\s+Number\s+(\S+)", flat, re.I)
         if m:
-            inv_no = m.group(1).strip()
+            inv_no = str(m.group(1)).strip()
 
+        # Account number
         account = ""
-        m = self._ACCOUNT.search(text)
+        m = re.search(r"^Account\s+Number\s+([A-Z0-9]{4,12})", text, re.I | re.M)
         if m:
             account = m.group(1).strip()
 
+        # Invoice date — handle both "Invoice Date  April 07, 2026" (inline)
+        # and "Invoice Date\n   April 07, 2026" (next line)
         inv_date = ""
-        m = self._DATE.search(text)
+        m = re.search(
+            r"Invoice\s+Date\s*:?\s*\n?\s*([A-Za-z]+ \d{1,2},?\s*\d{4})",
+            text, re.IGNORECASE,
+        )
         if m:
-            inv_date = m.group(1).strip()
+            inv_date = _norm_date(m.group(1).strip())
 
+        # Due date
         due_date = ""
-        m = self._DUE.search(text)
+        m = re.search(
+            r"Invoice\s+Due\s+Date\s*:?\s*\n?\s*([A-Za-z]+ \d{1,2},?\s*\d{4})",
+            text, re.IGNORECASE,
+        )
         if m:
-            due_date = m.group(1).strip()
+            due_date = _norm_date(m.group(1).strip())
 
-        flat = re.sub(r"\s+", " ", text)
-
-        m_billed = re.search(
-            r"Amount due this period\s+CAD\s+([\d,]+\.\d{2})", flat, re.I
-        )
-        billed = _f(m_billed.group(1)) if m_billed else None
+        # Billed amount
+        m = re.search(r"Amount due this period\s+CAD\s+([\d,]+\.\d{2})", flat, re.I)
+        billed = _f(m.group(1)) if m else None
         if billed is None:
-            m_billed = re.search(
-                r"Amount due this period\s*\$?\s*([\d,]+\.\d{2})", flat, re.I
-            )
-            billed = _f(m_billed.group(1)) if m_billed else None
+            m = re.search(r"Amount due this period\s*\$?\s*([\d,]+\.\d{2})", flat, re.I)
+            billed = _f(m.group(1)) if m else None
 
-        m_inc = re.search(
-            r"Total incentive savings this period\s+\$\s*([\d,]+\.\d{2})", flat, re.I
-        )
-        if not m_inc:
-            m_inc = re.search(r"Total\s+Incentives\s+([\d,]+\.\d{2})", flat, re.I)
-        incentive = _f(m_inc.group(1)) if m_inc else None
+        # Incentive savings
+        m = re.search(r"Total incentive savings this period\s+\$\s*([\d,]+\.\d{2})", flat, re.I)
+        if not m:
+            m = re.search(r"Total\s+Incentives\s+([\d,]+\.\d{2})", flat, re.I)
+        incentive = _f(m.group(1)) if m else None
 
-        tax = _sum_total_taxes(text)
+        # Tax — last match of "Total Taxes <amount>"
+        tax = _extract_total_tax(text)
 
+        # Shipping adjustments
         ship_adj = None
         m = re.search(
             r"Total\s+Shipping\s+Charge\s+Corrections\s+\d+\s+Package\(s\)\s+([\d,]+\.\d{2})",
-            text,
-            re.I,
+            text, re.I,
         )
         if m:
             ship_adj = _f(m.group(1))
 
+        # Adjustments total
         adj_total = 0.0
-        m = re.search(
-            r"Total\s+Adjustments\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})", text, re.I
-        )
+        m = re.search(r"Total\s+Adjustments\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})", text, re.I)
         if m:
             adj_total += _f(m.group(2)) or 0.0
-        m = re.search(
-            r"Total\s+Address\s+Corrections\s+\d+\s+([\d,]+\.\d{2})", text, re.I
-        )
+        m = re.search(r"Total\s+Address\s+Corrections\s+\d+\s+([\d,]+\.\d{2})", text, re.I)
         if m:
             adj_total += _f(m.group(1)) or 0.0
         adj = round(adj_total, 2) if adj_total > 0 else None
 
+        # Explanation
         explanations: list[str] = []
         for line in text.splitlines():
             lo = line.lower()
@@ -244,8 +233,9 @@ class UPSDomesticParser(BaseInvoiceParser):
                     )
         explanation = "; ".join(explanations)
 
+        # Subtotal (used in detail sheet; summary sheet uses the formula =J-I-H)
         subtotal = (
-            round(billed - tax, 2) if (billed is not None and tax is not None) else billed
+            round(billed - (tax or 0.0), 2) if billed is not None else None
         )
 
         if not inv_no:
@@ -254,8 +244,6 @@ class UPSDomesticParser(BaseInvoiceParser):
             warnings.append(f"{filename}: Could not extract Account Number.")
         if billed is None:
             warnings.append(f"{filename}: Could not find Amount Due.")
-        if tax is None:
-            warnings.append(f"{filename}: Could not determine Total Taxes.")
 
         invoice: dict[str, Any] = {
             "Invoice Number": inv_no,
@@ -266,7 +254,7 @@ class UPSDomesticParser(BaseInvoiceParser):
             "Payment Status": "",
             "Subtotal": subtotal,
             "Tax": tax,
-            "Government Charges": None,
+            "Government Charges": 0,
             "Billed Amount": billed,
             "Due Date": due_date,
             "Type": "Domestic/Export",
@@ -275,6 +263,12 @@ class UPSDomesticParser(BaseInvoiceParser):
             "Explanation": explanation,
             "Incentive Savings": incentive,
         }
+
+        print(
+            f"Parsed [Domestic/Export] {inv_no} | "
+            f"Billed={billed} Tax={tax} GovtCharge=0",
+            flush=True,
+        )
 
         shipments = self._extract_shipments(text, invoice)
         adjustments = self._extract_adjustments(text, invoice)
@@ -457,7 +451,7 @@ class UPSDomesticParser(BaseInvoiceParser):
             elif re.match(r"1z[a-z0-9]{16}", lo.split()[0] if lo.split() else ""):
                 tn = line.strip().split()[0]
                 if "1st ref:" not in lo and "2nd ref:" not in lo:
-                    window = "\n".join(lines[i : i + 6])
+                    window = "\n".join(lines[i: i + 6])
                     so, po = _find_so_po(window)
                     amt = re.search(r"([\d,]+\.\d{2})\s*$", line.strip())
                     if lo.endswith("standard") or amt:
@@ -479,7 +473,7 @@ class UPSDomesticParser(BaseInvoiceParser):
                 tn_m = re.search(r"(1Z[A-Z0-9]{16})", line, re.I)
                 current_pickup = date_m.group(1) if date_m else ""
                 current_tracking = tn_m.group(1) if tn_m else ""
-                window = "\n".join(lines[i : i + 8])
+                window = "\n".join(lines[i: i + 8])
                 current_so, current_po = _find_so_po(window)
 
             elif "total shipping charge corrections" in lo:

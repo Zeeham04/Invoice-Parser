@@ -12,7 +12,7 @@ import pdfplumber
 
 from .base_parser import ParseResult
 from .ups_domestic import UPSDomesticParser
-from .ups_import import UPSImportParser
+from .ups_import import UPSImportTypeBParser, UPSImportTypeCParser, is_type_b
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ MIN_TEXT_CHARS = 40
 
 def extract_text_from_pdf(data: bytes, filename: str = "") -> tuple[str, str | None]:
     """
-    Extract text using pdfplumber; fallback to pdfminer.six.
+    Extract text using pdfplumber; fallback to pdfminer.six; final fallback to OCR.
     Returns (text, error_message_if_image_only).
     """
     err: str | None = None
@@ -82,15 +82,21 @@ def extract_text_from_pdf(data: bytes, filename: str = "") -> tuple[str, str | N
 
 
 def detect_invoice_type(text: str) -> str:
+    """
+    Return one of:
+      'type_a' — UPS Delivery Service Invoice (Domestic/Export)
+      'type_b' — UPS Customs Brokerage with Government Charges + Brokerage Charges lines
+      'type_c' — UPS Customs Brokerage, shipping charges only (no duties)
+    """
     upper = text.upper()
-    if "CUSTOMS BROKERAGE INVOICE" in upper or "CUSTOMS BROKERAGE" in upper:
-        return "import"
     if "DELIVERY SERVICE INVOICE" in upper:
-        return "domestic"
-    # Default heuristic
+        return "type_a"
+    if "CUSTOMS BROKERAGE" in upper:
+        return "type_b" if is_type_b(text) else "type_c"
+    # Heuristic fallback
     if "NET PAYABLE" in upper and "BROKERAGE" in upper:
-        return "import"
-    return "domestic"
+        return "type_b" if is_type_b(text) else "type_c"
+    return "type_a"
 
 
 _SPLIT_PATTERNS = (
@@ -102,7 +108,7 @@ _SPLIT_PATTERNS = (
 def split_text_into_invoice_segments(text: str) -> list[str]:
     """
     When a single PDF contains multiple invoices, UPS repeats the invoice title line.
-    Split on those markers so each segment can be parsed independently.
+    Split on those markers so each segment is parsed independently.
     """
     best_matches: list[re.Match[str]] | None = None
     for pat in _SPLIT_PATTERNS:
@@ -118,6 +124,14 @@ def split_text_into_invoice_segments(text: str) -> list[str]:
         seg_end = starts[i + 1] if i + 1 < len(starts) else len(text)
         chunks.append(text[seg_start:seg_end])
     return chunks
+
+
+def _make_parser(kind: str):
+    if kind == "type_b":
+        return UPSImportTypeBParser()
+    if kind == "type_c":
+        return UPSImportTypeCParser()
+    return UPSDomesticParser()
 
 
 def parse_pdf_bytes(data: bytes, filename: str) -> dict[str, Any]:
@@ -146,9 +160,9 @@ def parse_pdf_bytes(data: bytes, filename: str) -> dict[str, Any]:
     for seg in segments:
         kind = detect_invoice_type(seg)
         kinds_seen.append(kind)
-        parser = UPSImportParser() if kind == "import" else UPSDomesticParser()
+        parser = _make_parser(kind)
         try:
-            result = parser.parse(seg, filename)
+            result: ParseResult = parser.parse(seg, filename)
         except Exception as e:
             logger.exception("Parse error %s", filename)
             warnings.append(f"{filename}: Parse error — {e}")
@@ -172,7 +186,8 @@ def parse_pdf_bytes(data: bytes, filename: str) -> dict[str, Any]:
     if len(unique_kinds) > 1:
         detected_label = "Mixed"
     elif kinds_seen:
-        detected_label = "Import" if kinds_seen[0] == "import" else "Domestic/Export"
+        k = kinds_seen[0]
+        detected_label = "Domestic/Export" if k == "type_a" else "Import"
     else:
         detected_label = ""
 
