@@ -581,11 +581,19 @@ def build_summary_workbook_bytes(
         ]
 
         for c, value in enumerate(row_values, start=1):
+            if c == 7:
+                print(
+                    f"Writing subtotal formula to G{row_idx}: "
+                    f"=J{row_idx}-I{row_idx}-H{row_idx}",
+                    flush=True,
+                )
             cell = ws.cell(row=row_idx, column=c, value=value)
             if c == 1:
                 cell.number_format = '@'
             elif c in CURRENCY_COLS:
                 cell.number_format = ACCT_FMT
+            if c == 7:
+                print(f"G{row_idx} cell value after write: {cell.value!r}", flush=True)
 
     # N = index of last data row (header=1, data rows 2..N)
     N = len(sorted_inv) + 1

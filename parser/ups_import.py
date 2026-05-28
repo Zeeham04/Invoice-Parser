@@ -227,23 +227,34 @@ class UPSImportTypeBParser(BaseInvoiceParser):
 
         hdr = _extract_import_header(text)
         inv_no = hdr["inv_no"]
+        # Pad to reference format: all-digit → 15 chars; letter-containing → prepend '000000'
+        if inv_no:
+            if inv_no.isdigit() and len(inv_no) < 15:
+                inv_no = inv_no.zfill(15)
+            elif not inv_no.isdigit() and len(inv_no) < 15:
+                inv_no = "000000" + inv_no
         account = hdr["account"]
         inv_date = hdr["inv_date"]
         due_date = hdr["due_date"]
         billed = _f(hdr["billed_str"])
 
-        # Government Charges: bare line "^Government Charges <amount>"
-        # NOT "Total Government Charges" — that is a footer roll-up
+        # Government Charges: bare line "^Government Charges <amount>".
+        # pdftotext sometimes wraps the value to the next line, so try that first.
+        # The ^ anchor excludes "Total Government Charges" (has "Total" before it).
         govt: float | None = None
-        m = re.search(r"^Government Charges\s+([\d,]+\.\d{2})", text, re.I | re.M)
+        m = re.search(r"^Government Charges\s*\n\s*([\d,]+\.\d{2})", text, re.I | re.M)
+        if not m:
+            m = re.search(r"^Government Charges\s+([\d,]+\.\d{2})", text, re.I | re.M)
         if m:
             v = _f(m.group(1))
             if v is not None and v > 0:
                 govt = v
 
-        # Brokerage Charges: bare line "^Brokerage Charges <amount>"
+        # Brokerage Charges: same two-variant match (next-line then same-line).
         brokerage: float | None = None
-        m = re.search(r"^Brokerage Charges\s+([\d,]+\.\d{2})", text, re.I | re.M)
+        m = re.search(r"^Brokerage Charges\s*\n\s*([\d,]+\.\d{2})", text, re.I | re.M)
+        if not m:
+            m = re.search(r"^Brokerage Charges\s+([\d,]+\.\d{2})", text, re.I | re.M)
         if m:
             v = _f(m.group(1))
             if v is not None and v > 0:
