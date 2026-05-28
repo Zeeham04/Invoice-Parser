@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import io
-import platform
 import re
 from datetime import datetime
 from typing import Any
@@ -151,6 +150,7 @@ SUMMARY_COLS: list[ColSpec] = [
     ("Payment Status", "Payment Status", False, False, 14),
     ("Subtotal", "Subtotal", True, False, 12),
     ("Tax", "Tax", True, False, 12),
+    ("Government Charges", "Government Charges", True, False, 16),
     ("Billed Amount", "Billed Amount", True, False, 14),
     ("Due Date", "Due Date", False, True, 18),
     ("Type", "Type", False, False, 16),
@@ -293,28 +293,6 @@ def _cell_value(row: dict[str, Any], key: str) -> Any:
                 pass
     return row.get(key)
 
-
-def _pad_invoice_number(value: Any) -> str:
-    raw = str(value or "").strip()
-    if len(raw) < 15:
-        return "0" * (15 - len(raw)) + raw
-    return raw
-
-
-def _format_summary_date(value: Any) -> str:
-    if value is None or value == "":
-        return ""
-    if isinstance(value, datetime):
-        dt = value
-    else:
-        raw = str(value).strip()
-        if not raw:
-            return ""
-        dt = _parse_date_for_sort(raw)
-        if dt == datetime.min:
-            return raw
-    day_fmt = "%B %#d, %Y" if platform.system() == "Windows" else "%B %-d, %Y"
-    return dt.strftime(day_fmt)
 
 
 def _write_row(
@@ -538,58 +516,148 @@ def build_workbook_bytes(
 def build_summary_workbook_bytes(
     invoices: list[dict[str, Any]],
 ) -> bytes:
-    """
-    Summary Excel — one sheet, one row per invoice.
-    Columns match the app summary: Invoice Number, Account Number, Amount Due,
-    Invoice Date, Invoice Status, Payment Status, Subtotal, Tax, Billed Amount,
-    Due Date, Type.
-    """
+    """Summary Excel — one sheet, one row per invoice, plus per-account totals."""
     wb = Workbook()
     ws = wb.active
     ws.title = "Sheet1"
 
-    widths = [16.83, 14.83, 10.83, 17.83, 12.66, 14.16, 14.83, 11.66, 14.83, 17.83, 15.83]
-    for col_idx, (label, _, _, _, _) in enumerate(SUMMARY_COLS, start=1):
+    SUMMARY_DATE_FMT = "MMMM DD, YYYY"
+    SUMMARY_CURRENCY_COLS = {3, 7, 8, 9, 10}
+    SUMMARY_DATE_COLS = {4, 11}
+
+    headers = [
+        "Invoice Number",   # 1
+        "Account Number",   # 2
+        "Amount Due",       # 3
+        "Invoice Date",     # 4
+        "Invoice Status",   # 5
+        "Payment Status",   # 6
+        "Subtotal",         # 7
+        "Tax",              # 8
+        "Government Charges",  # 9
+        "Billed Amount",    # 10
+        "Due Date",         # 11
+        "Type",             # 12
+    ]
+    widths = [16.83, 14.83, 10.83, 17.83, 12.66, 14.16, 14.83, 11.66, 16.0, 14.83, 17.83, 15.83]
+
+    for col_idx, label in enumerate(headers, start=1):
         cell = ws.cell(row=1, column=col_idx, value=label)
         cell.font = Font(bold=True, size=12)
         ws.column_dimensions[get_column_letter(col_idx)].width = widths[col_idx - 1]
 
-    def _dk(inv: dict[str, Any]) -> datetime:
-        return _parse_date_for_sort(str(inv.get("Invoice Date") or ""))
+    def _to_dt(val: Any) -> datetime | None:
+        if val is None or val == "":
+            return None
+        if isinstance(val, datetime):
+            return val
+        dt = _parse_date_for_sort(str(val).strip())
+        return dt if dt != datetime.min else None
 
-    sorted_inv = sorted(invoices, key=_dk, reverse=True)
+    def _safe_float(val: Any) -> float:
+        if val in (None, ""):
+            return 0.0
+        try:
+            return float(str(val).replace(",", "").strip())
+        except (TypeError, ValueError):
+            return 0.0
+
+    sorted_inv = sorted(
+        invoices,
+        key=lambda r: _parse_date_for_sort(str(r.get("Invoice Date") or "")),
+        reverse=True,
+    )
+
+    account_totals: dict[str, dict[str, float]] = {}
+
     for row_idx, inv in enumerate(sorted_inv, start=2):
-        invoice_number = _pad_invoice_number(inv.get("Invoice Number"))
+        invoice_number = str(inv.get("Invoice Number") or "").strip()
         account_number = str(inv.get("Account Number") or "")
-        invoice_date = _format_summary_date(inv.get("Invoice Date"))
-        due_date = _format_summary_date(inv.get("Due Date"))
-        invoice_status = f"{str(inv.get('Invoice Status') or '').rstrip()} "
+        inv_type = str(inv.get("Type") or "")
+        is_import = "import" in inv_type.lower()
+
+        invoice_date = _to_dt(inv.get("Invoice Date"))
+        due_date = _to_dt(inv.get("Due Date"))
+
         payment_status = str(inv.get("Payment Status") or "Accepted")
-        tax_value = inv.get("Tax")
-        if tax_value in (None, ""):
-            tax_value = 0
-        billed_value = inv.get("Billed Amount")
-        if billed_value in (None, ""):
-            billed_value = 0
+        invoice_status = "Closed" if payment_status == "Accepted" else str(inv.get("Invoice Status") or "Closed")
+
+        tax = round(_safe_float(inv.get("Tax")), 2)
+        govt_charges = round(_safe_float(inv.get("Government Charges")), 2) if is_import else 0.0
+        billed = round(_safe_float(inv.get("Billed Amount")), 2)
+
+        raw_sub = inv.get("Subtotal")
+        if raw_sub not in (None, ""):
+            subtotal = round(_safe_float(raw_sub), 2)
+        elif is_import:
+            subtotal = round(billed - tax - govt_charges, 2)
+        else:
+            subtotal = round(billed - tax, 2)
+
+        if account_number not in account_totals:
+            account_totals[account_number] = {
+                "Subtotal": 0.0,
+                "Tax": 0.0,
+                "Government Charges": 0.0,
+                "Billed Amount": 0.0,
+            }
+        account_totals[account_number]["Subtotal"] = round(
+            account_totals[account_number]["Subtotal"] + subtotal, 2
+        )
+        account_totals[account_number]["Tax"] = round(
+            account_totals[account_number]["Tax"] + tax, 2
+        )
+        account_totals[account_number]["Government Charges"] = round(
+            account_totals[account_number]["Government Charges"] + govt_charges, 2
+        )
+        account_totals[account_number]["Billed Amount"] = round(
+            account_totals[account_number]["Billed Amount"] + billed, 2
+        )
 
         row_values = [
-            invoice_number,
-            account_number,
-            "$0.00",
-            invoice_date,
-            invoice_status,
-            payment_status,
-            f"=I{row_idx}-H{row_idx}",
-            tax_value,
-            billed_value,
-            due_date,
-            str(inv.get("Type") or ""),
+            invoice_number,  # 1
+            account_number,  # 2
+            0.0,             # 3 Amount Due
+            invoice_date,    # 4
+            invoice_status,  # 5
+            payment_status,  # 6
+            subtotal,        # 7
+            tax,             # 8
+            govt_charges,    # 9
+            billed,          # 10
+            due_date,        # 11
+            inv_type,        # 12
         ]
 
-        for col_idx, value in enumerate(row_values, start=1):
-            cell = ws.cell(row=row_idx, column=col_idx, value=value)
-            if col_idx in (7, 8, 9):
+        for c, value in enumerate(row_values, start=1):
+            cell = ws.cell(row=row_idx, column=c, value=value)
+            if c in SUMMARY_CURRENCY_COLS:
                 cell.number_format = ACCOUNTING_FMT
+            elif c in SUMMARY_DATE_COLS and isinstance(value, datetime):
+                cell.number_format = SUMMARY_DATE_FMT
+
+    # Blank row then per-account total rows
+    total_start = len(sorted_inv) + 3  # +1 header, +1 blank, +1
+
+    total_font = Font(bold=True, size=12)
+    total_fill = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid")
+
+    for i, (acct_no, totals) in enumerate(account_totals.items()):
+        tr = total_start + i
+        for c in range(1, len(headers) + 1):
+            cell = ws.cell(row=tr, column=c)
+            cell.font = total_font
+            cell.fill = total_fill
+        ws.cell(row=tr, column=1).value = f"Total – {acct_no}"
+        ws.cell(row=tr, column=2).value = acct_no
+        for col_n, key in [
+            (7, "Subtotal"),
+            (8, "Tax"),
+            (9, "Government Charges"),
+            (10, "Billed Amount"),
+        ]:
+            cell = ws.cell(row=tr, column=col_n, value=round(totals[key], 2))
+            cell.number_format = ACCOUNTING_FMT
 
     bio = io.BytesIO()
     wb.save(bio)
