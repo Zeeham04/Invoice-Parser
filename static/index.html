@@ -3,655 +3,285 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Invoice Parser</title>
+  <title>UPS Invoice Parser</title>
   <style>
-    :root {
-      --border: #cfd8dc;
-      --muted: #546e7a;
-      --ok: #2e7d32;
-      --bad: #c62828;
-      --accent: #1565c0;
-      --header-bg: #e3f2fd;
-    }
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: "Segoe UI", system-ui, sans-serif;
-      margin: 0;
       background: #fff;
-      color: #212121;
-      line-height: 1.45;
+      color: #111;
+      line-height: 1.5;
     }
-    .wrap {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 24px 20px 48px;
-    }
-    h1 {
-      font-weight: 600;
-      font-size: 1.75rem;
-      margin: 0 0 8px;
-    }
-    .sub {
-      color: var(--muted);
-      margin-bottom: 24px;
-      font-size: 0.95rem;
-    }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 32px 20px 64px; }
+    h1 { font-size: 1.6rem; font-weight: 700; margin-bottom: 4px; }
+    .sub { color: #666; font-size: 0.9rem; margin-bottom: 28px; }
+
+    /* Drop zone */
     .dropzone {
-      border: 2px dashed var(--border);
-      border-radius: 12px;
-      padding: 48px 24px;
+      border: 2px dashed #c0c8d0;
+      border-radius: 10px;
+      padding: 52px 24px;
       text-align: center;
       cursor: pointer;
-      transition: border-color 0.2s, background 0.2s;
       background: #fafafa;
+      transition: border-color 0.2s, background 0.2s;
     }
-    .dropzone:hover, .dropzone.dragover {
-      border-color: var(--accent);
-      background: #f5f9ff;
-    }
-    .dropzone svg {
-      width: 48px;
-      height: 48px;
-      margin-bottom: 12px;
-      opacity: 0.7;
-    }
-    .dropzone p { margin: 8px 0 0; color: var(--muted); font-size: 0.9rem; }
-    input[type="file"] { display: none; }
+    .dropzone:hover, .dropzone.over { border-color: #1a5fd6; background: #f0f5ff; }
+    .dropzone svg { width: 44px; height: 44px; opacity: 0.55; margin-bottom: 10px; }
+    .dropzone strong { font-size: 1rem; display: block; margin-bottom: 4px; }
+    .dropzone p { font-size: 0.85rem; color: #666; }
+    input[type=file] { display: none; }
 
-    .toolbar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      margin-top: 20px;
-      align-items: center;
-    }
+    /* Buttons */
+    .toolbar { display: flex; gap: 12px; margin-top: 20px; flex-wrap: wrap; align-items: center; }
     button {
-      font: inherit;
-      padding: 10px 20px;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      background: #fff;
-      cursor: pointer;
+      font: inherit; font-size: 0.95rem;
+      padding: 10px 22px; border-radius: 8px;
+      border: 1px solid #c0c8d0; background: #fff;
+      cursor: pointer; transition: background 0.15s;
     }
-    button.primary {
-      background: var(--accent);
-      color: #fff;
-      border-color: var(--accent);
-    }
-    button.primary:disabled {
-      opacity: 0.45;
-      cursor: not-allowed;
-    }
-    button.ghost:hover { background: #f5f5f5; }
+    button.primary { background: #1a5fd6; color: #fff; border-color: #1a5fd6; }
+    button.primary:hover:not(:disabled) { background: #1450b8; }
+    button.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    button.ghost:hover { background: #f3f4f6; }
 
-    .summary-bar {
-      margin-top: 24px;
-      padding: 16px 20px;
-      background: var(--header-bg);
-      border-radius: 10px;
-      display: none;
-      font-size: 1rem;
-    }
-    .summary-bar.visible { display: block; }
-    .summary-bar strong { color: var(--accent); }
-
-    .cards {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 14px;
-      margin-top: 20px;
-    }
-    .card {
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 14px 16px;
-      background: #fff;
-    }
-    .card h3 {
-      margin: 0 0 8px;
-      font-size: 0.95rem;
-      word-break: break-all;
-      display: flex;
-      align-items: flex-start;
-      gap: 8px;
-    }
-    .badge {
-      font-size: 0.75rem;
-      padding: 2px 8px;
-      border-radius: 999px;
-      background: #eceff1;
-      white-space: nowrap;
-    }
-    .card dl {
-      margin: 0;
-      display: grid;
-      grid-template-columns: auto 1fr;
-      gap: 4px 12px;
-      font-size: 0.85rem;
-    }
-    .card dt { color: var(--muted); }
-    .card dd { margin: 0; }
-
-    .status-ok { color: var(--ok); font-weight: 600; }
-    .status-bad { color: var(--bad); font-weight: 600; }
-
-    .progress {
-      display: none;
-      margin-top: 16px;
-      align-items: center;
-      gap: 12px;
-      color: var(--muted);
-    }
-    .progress.visible { display: flex; }
+    /* Spinner */
+    .progress { display: none; align-items: center; gap: 10px; color: #666; margin-top: 14px; font-size: 0.9rem; }
+    .progress.on { display: flex; }
     .spinner {
-      width: 22px;
-      height: 22px;
-      border: 3px solid #e0e0e0;
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
+      width: 20px; height: 20px;
+      border: 3px solid #e0e0e0; border-top-color: #1a5fd6;
+      border-radius: 50%; animation: spin 0.75s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    section { margin-top: 32px; }
-    section h2 {
-      font-size: 1.1rem;
-      margin: 0 0 12px;
-      font-weight: 600;
-    }
-    .table-wrap {
-      overflow: auto;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      max-height: 420px;
-    }
-    table {
-      border-collapse: collapse;
-      width: 100%;
-      font-size: 0.85rem;
-    }
-    th, td {
-      padding: 8px 12px;
-      text-align: left;
-      border-bottom: 1px solid #eee;
-      white-space: nowrap;
-    }
-    th {
-      background: var(--header-bg);
-      position: sticky;
-      top: 0;
-      z-index: 1;
-      font-weight: 600;
-    }
-    .warnings {
-      background: #fff8e1;
-      border: 1px solid #ffe082;
-      border-radius: 10px;
-      padding: 14px 18px;
-      font-size: 0.9rem;
-      display: none;
-    }
-    .warnings.visible { display: block; }
-    .warnings ul { margin: 8px 0 0; padding-left: 20px; }
-    .export-group {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-    .file-label {
-      font-size: 0.8rem;
-      color: var(--muted);
-      font-weight: 500;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-    }
-    .file-name-row {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .file-name-input {
-      font: inherit;
-      font-size: 0.9rem;
-      padding: 8px 10px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      width: 180px;
-      color: #212121;
-    }
-    .file-name-input:focus {
-      outline: 2px solid var(--accent);
-      outline-offset: 1px;
-    }
-    .ext-hint {
-      font-size: 0.85rem;
-      color: var(--muted);
-      margin-right: 4px;
-    }
+    /* Summary bar */
+    .bar { display: none; margin-top: 20px; padding: 14px 18px; background: #eef3ff; border-radius: 8px; font-size: 0.9rem; }
+    .bar.on { display: block; }
+    .bar strong { color: #1a5fd6; }
+
+    /* Status table */
+    section { margin-top: 28px; }
+    section h2 { font-size: 1rem; font-weight: 600; margin-bottom: 10px; }
+    .tbl-wrap { overflow: auto; border: 1px solid #dde1e7; border-radius: 8px; max-height: 360px; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+    th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #eee; white-space: nowrap; }
+    th { background: #f0f4f8; position: sticky; top: 0; z-index: 1; font-weight: 600; }
+    .ok  { color: #1a7a3e; font-weight: 600; }
+    .bad { color: #b91c1c; font-weight: 600; }
+
+    /* Warnings */
+    .warns { display: none; margin-top: 16px; padding: 14px 18px; background: #fffbeb; border: 1px solid #fbbf24; border-radius: 8px; font-size: 0.85rem; }
+    .warns.on { display: block; }
+    .warns ul { margin-top: 6px; padding-left: 18px; }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <h1>Invoice Parser</h1>
-    <p class="sub">
-      Drop UPS PDF invoices below. Data is parsed locally — nothing is uploaded to the cloud.
-    </p>
+<div class="wrap">
+  <h1>UPS Invoice Parser</h1>
+  <p class="sub">Drop UPS PDF invoices, click Parse, then download the summary Excel.</p>
 
-    <div class="dropzone" id="dropzone" tabindex="0">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <path d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-      <strong>Drag & drop PDF invoices here</strong>
-      <p>or click to browse · multiple files supported</p>
-      <input type="file" id="fileInput" accept=".pdf,application/pdf" multiple />
-    </div>
-
-    <div class="progress" id="progress">
-      <div class="spinner"></div>
-      <span id="progressText">Parsing PDFs…</span>
-    </div>
-
-    <div class="toolbar">
-      <div class="export-group">
-        <label class="file-label" for="nameSummary">Summary file name</label>
-        <div class="file-name-row">
-          <input type="text" id="nameSummary" class="file-name-input"
-                 placeholder="invoice_summary" value="invoice_summary" />
-          <span class="ext-hint">.xlsx</span>
-          <button type="button" class="primary" id="btnSummary" disabled>
-            ⬇ Download Summary
-          </button>
-        </div>
-      </div>
-      <div class="export-group">
-        <label class="file-label" for="nameDetail">Full detail file name</label>
-        <div class="file-name-row">
-          <input type="text" id="nameDetail" class="file-name-input"
-                 placeholder="invoice_detail" value="invoice_detail" />
-          <span class="ext-hint">.xlsx</span>
-          <button type="button" class="primary" id="btnDetail" disabled>
-            ⬇ Download Full Detail
-          </button>
-        </div>
-      </div>
-      <button type="button" class="ghost" id="btnClear">Clear All</button>
-    </div>
-
-    <div class="summary-bar" id="summaryBar"></div>
-
-    <div class="cards" id="cards"></div>
-
-    <div class="warnings" id="warnings">
-      <strong>Warnings</strong>
-      <ul id="warnList"></ul>
-    </div>
-
-    <section>
-      <h2>Invoice summary preview</h2>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Invoice #</th>
-              <th>Account</th>
-              <th>Billed</th>
-              <th>Tax</th>
-              <th>Date</th>
-              <th>Type</th>
-              <th>Due</th>
-            </tr>
-          </thead>
-          <tbody id="tblSummary"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <section>
-      <h2>Shipment detail preview</h2>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Invoice #</th>
-              <th>Tracking</th>
-              <th>Service</th>
-              <th>Billed</th>
-              <th>Order date</th>
-              <th>Postal</th>
-              <th>SO#</th>
-              <th>PO#</th>
-            </tr>
-          </thead>
-          <tbody id="tblShip"></tbody>
-        </table>
-      </div>
-    </section>
+  <div class="dropzone" id="dz" tabindex="0">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <strong>Drag &amp; drop PDF invoices here</strong>
+    <p>or click to browse — multiple files supported</p>
+    <input type="file" id="fi" accept=".pdf,application/pdf" multiple />
   </div>
 
-  <script>
-    const dropzone = document.getElementById('dropzone');
-    const fileInput = document.getElementById('fileInput');
-    const progress = document.getElementById('progress');
-    const progressText = document.getElementById('progressText');
-    const btnSummary = document.getElementById('btnSummary');
-    const btnDetail  = document.getElementById('btnDetail');
-    const nameSummary = document.getElementById('nameSummary');
-    const nameDetail  = document.getElementById('nameDetail');
-    const btnClear = document.getElementById('btnClear');
-    const summaryBar = document.getElementById('summaryBar');
-    const cards = document.getElementById('cards');
-    const warnings = document.getElementById('warnings');
-    const warnList = document.getElementById('warnList');
-    const tblSummary = document.getElementById('tblSummary');
-    const tblShip = document.getElementById('tblShip');
+  <div class="toolbar">
+    <button class="primary" id="btnParse" disabled>Parse &amp; Export</button>
+    <button class="primary" id="btnDl" disabled>⬇ Download Summary (.xlsx)</button>
+    <button class="ghost"   id="btnClear">Clear</button>
+  </div>
 
-    let lastResults = [];
-    let aggregateInvoices = [];
-    let aggregateShipments = [];
-    let aggregateAdjustments = [];
+  <div class="progress" id="prog"><div class="spinner"></div><span id="progTxt">Parsing…</span></div>
 
-    function fmtMoney(v) {
-      if (v == null || v === '') return '';
-      const n = Number(v);
-      if (Number.isNaN(n)) return v;
-      return n.toLocaleString('en-CA', { style: 'currency', currency: 'CAD' });
+  <div class="bar" id="bar"></div>
+
+  <div class="warns" id="warns"><strong>Warnings</strong><ul id="warnList"></ul></div>
+
+  <section>
+    <h2>Parse results</h2>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>File</th><th>Invoice #</th><th>Account</th>
+            <th>Billed</th><th>Tax</th><th>Govt Charges</th>
+            <th>Date</th><th>Type</th><th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="tbl"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script>
+  const dz       = document.getElementById('dz');
+  const fi       = document.getElementById('fi');
+  const btnParse = document.getElementById('btnParse');
+  const btnDl    = document.getElementById('btnDl');
+  const btnClear = document.getElementById('btnClear');
+  const prog     = document.getElementById('prog');
+  const progTxt  = document.getElementById('progTxt');
+  const bar      = document.getElementById('bar');
+  const warns    = document.getElementById('warns');
+  const warnList = document.getElementById('warnList');
+  const tbl      = document.getElementById('tbl');
+
+  let pendingFiles  = [];   // File[] waiting to be parsed
+  let parsedInvoices = [];  // invoice dicts from successful parses
+
+  function fmt$(v) {
+    const n = parseFloat(v);
+    if (isNaN(n)) return v || '—';
+    return n.toLocaleString('en-CA', { style: 'currency', currency: 'CAD' });
+  }
+  function esc(s) {
+    if (!s && s !== 0) return '';
+    const d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+  }
+
+  // ── Drop zone ───────────────────────────────────────────────────────────────
+  dz.addEventListener('click', () => fi.click());
+  dz.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fi.click(); } });
+  ['dragenter','dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('over'); }));
+  ['dragleave','drop'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('over'); }));
+  dz.addEventListener('drop', e => {
+    const files = Array.from(e.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+    if (files.length) addFiles(files);
+  });
+  fi.addEventListener('change', () => { if (fi.files.length) addFiles(Array.from(fi.files)); fi.value = ''; });
+
+  function addFiles(files) {
+    pendingFiles = files;
+    btnParse.disabled = false;
+    bar.classList.remove('on');
+    bar.innerHTML = '';
+    tbl.innerHTML = '';
+    warnList.innerHTML = '';
+    warns.classList.remove('on');
+    btnDl.disabled = true;
+    parsedInvoices = [];
+    // Show file names
+    bar.classList.add('on');
+    bar.innerHTML = `<strong>${files.length}</strong> file(s) selected: ${files.map(f => esc(f.name)).join(', ')}`;
+  }
+
+  // ── Parse ───────────────────────────────────────────────────────────────────
+  btnParse.addEventListener('click', async () => {
+    if (!pendingFiles.length) return;
+    prog.classList.add('on');
+    progTxt.textContent = `Parsing ${pendingFiles.length} file(s)…`;
+    btnParse.disabled = true;
+    btnDl.disabled = true;
+
+    const fd = new FormData();
+    pendingFiles.forEach(f => fd.append('files', f));
+
+    let data;
+    try {
+      const res = await fetch('/api/parse', { method: 'POST', body: fd });
+      data = await res.json();
+    } catch (err) {
+      alert('Parse request failed: ' + err);
+      prog.classList.remove('on');
+      btnParse.disabled = false;
+      return;
+    }
+    prog.classList.remove('on');
+
+    const results = data.results || [];
+    parsedInvoices = [];
+    tbl.innerHTML = '';
+    warnList.innerHTML = '';
+
+    let okCount = 0;
+    let totalBilled = 0;
+    const allWarns = [];
+
+    for (const r of results) {
+      if (r.warnings && r.warnings.length) allWarns.push(...r.warnings);
+      const inv = r.ok ? (r.invoice || {}) : {};
+      if (r.ok) {
+        parsedInvoices.push(inv);
+        okCount++;
+        totalBilled += parseFloat(inv.billed_amount) || 0;
+      }
+
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        `<td>${esc(r.filename)}</td>` +
+        `<td>${esc(inv.invoice_number)}</td>` +
+        `<td>${esc(inv.account_number)}</td>` +
+        `<td>${fmt$(inv.billed_amount)}</td>` +
+        `<td>${fmt$(inv.tax)}</td>` +
+        `<td>${fmt$(inv.government_charges)}</td>` +
+        `<td>${esc(inv.invoice_date)}</td>` +
+        `<td>${esc(inv.invoice_type_label)}</td>` +
+        `<td class="${r.ok ? 'ok' : 'bad'}">${r.ok ? '✓ Parsed' : '✗ Error'}</td>`;
+      tbl.appendChild(tr);
     }
 
-    function resetUI() {
-      lastResults = [];
-      aggregateInvoices = [];
-      aggregateShipments = [];
-      aggregateAdjustments = [];
-      cards.innerHTML = '';
-      tblSummary.innerHTML = '';
-      tblShip.innerHTML = '';
-      warnList.innerHTML = '';
-      warnings.classList.remove('visible');
-      summaryBar.classList.remove('visible');
-      btnSummary.disabled = true;
-      btnDetail.disabled  = true;
+    if (allWarns.length) {
+      warns.classList.add('on');
+      allWarns.forEach(w => { const li = document.createElement('li'); li.textContent = w; warnList.appendChild(li); });
+    } else {
+      warns.classList.remove('on');
     }
 
-    dropzone.addEventListener('click', () => fileInput.click());
-    dropzone.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
-    });
+    if (okCount > 0) {
+      bar.classList.add('on');
+      bar.innerHTML = `<strong>${okCount}</strong> invoice(s) parsed · Total billed: <strong>${fmt$(totalBilled)}</strong>`;
+      btnDl.disabled = false;
+    } else {
+      bar.classList.add('on');
+      bar.innerHTML = `<span style="color:#b91c1c">No invoices could be parsed.</span>`;
+    }
+  });
 
-    ['dragenter', 'dragover'].forEach((ev) => {
-      dropzone.addEventListener(ev, (e) => {
-        e.preventDefault();
-        dropzone.classList.add('dragover');
+  // ── Download ─────────────────────────────────────────────────────────────────
+  btnDl.addEventListener('click', async () => {
+    if (!parsedInvoices.length) return;
+    try {
+      const res = await fetch('/api/export/summary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoices: parsedInvoices }),
       });
-    });
-    ['dragleave', 'drop'].forEach((ev) => {
-      dropzone.addEventListener(ev, (e) => {
-        e.preventDefault();
-        dropzone.classList.remove('dragover');
-      });
-    });
-    dropzone.addEventListener('drop', (e) => {
-      const files = Array.from(e.dataTransfer.files).filter((f) =>
-        f.name.toLowerCase().endsWith('.pdf')
-      );
-      if (files.length) uploadParse(files);
-    });
-
-    fileInput.addEventListener('change', () => {
-      const files = Array.from(fileInput.files || []);
-      if (files.length) uploadParse(files);
-      fileInput.value = '';
-    });
-
-    async function uploadParse(files) {
-      progress.classList.add('visible');
-      progressText.textContent = 'Parsing ' + files.length + ' file(s)…';
-      btnSummary.disabled = true;
-      btnDetail.disabled  = true;
-
-      const fd = new FormData();
-      files.forEach((f) => fd.append('files', f));
-
-      try {
-        const res = await fetch('/api/parse', { method: 'POST', body: fd });
-        const data = await res.json();
-        lastResults = data.results || [];
-        rebuildFromResults();
-      } catch (err) {
-        alert('Parse failed: ' + err);
-      } finally {
-        progress.classList.remove('visible');
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || 'Export failed');
+        return;
       }
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `UPS_Invoice_Summary_${new Date().toISOString().slice(0,10)}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      alert('Download error: ' + e);
     }
+  });
 
-    function rebuildFromResults() {
-      aggregateInvoices = [];
-      aggregateShipments = [];
-      aggregateAdjustments = [];
-      cards.innerHTML = '';
-      tblSummary.innerHTML = '';
-      tblShip.innerHTML = '';
-      warnList.innerHTML = '';
-
-      let parsedCount = 0;
-      let totalBilled = 0;
-      let totalTax = 0;
-      const warnAll = [];
-
-      for (const r of lastResults) {
-        if (r.warnings && r.warnings.length) {
-          r.warnings.forEach((w) => warnAll.push(w));
-        }
-        const ok = r.ok;
-        const invList =
-          ok && r.invoices && r.invoices.length
-            ? r.invoices
-            : ok && r.invoice && Object.keys(r.invoice).length
-              ? [r.invoice]
-              : [];
-        for (const inv of invList) {
-          parsedCount++;
-          aggregateInvoices.push(inv);
-          const bil = inv['Billed Amount'];
-          const tx = inv['Tax'];
-          if (bil != null) totalBilled += Number(bil) || 0;
-          if (tx != null) totalTax += Number(tx) || 0;
-        }
-        if (r.shipments) aggregateShipments.push(...r.shipments);
-        if (r.adjustments) aggregateAdjustments.push(...r.adjustments);
-
-        const card = document.createElement('div');
-        card.className = 'card';
-        const inv = invList[0] || {};
-        const billed = inv['Billed Amount'];
-        const multi =
-          invList.length > 1
-            ? '<span class="badge">' + invList.length + ' invoices</span>'
-            : '';
-        card.innerHTML =
-          '<h3><span>' +
-          escapeHtml(r.filename) +
-          '</span>' +
-          (ok
-            ? '<span class="status-ok" title="Information Collected">✓</span>'
-            : '<span class="status-bad" title="Error">✗</span>') +
-          '</h3>' +
-          '<span class="badge">' +
-          escapeHtml(r.detected_type || '—') +
-          '</span>' +
-          multi +
-          '<dl>' +
-          '<dt>Invoice #</dt><dd>' +
-          escapeHtml(inv['Invoice Number'] || '—') +
-          '</dd>' +
-          '<dt>Billed</dt><dd>' +
-          (billed != null ? fmtMoney(billed) : '—') +
-          '</dd>' +
-          '<dt>Status</dt><dd class="' +
-          (ok ? 'status-ok' : 'status-bad') +
-          '">' +
-          (ok ? 'Information Collected' : 'Error') +
-          '</dd></dl>';
-        cards.appendChild(card);
-
-        if (ok) {
-          for (const rowInv of invList) {
-            if (!rowInv['Invoice Number']) continue;
-            const tr = document.createElement('tr');
-            tr.innerHTML =
-              '<td>' +
-              escapeHtml(rowInv['Invoice Number'] || '') +
-              '</td>' +
-              '<td>' +
-              escapeHtml(rowInv['Account Number'] || '') +
-              '</td>' +
-              '<td>' +
-              fmtMoney(rowInv['Billed Amount']) +
-              '</td>' +
-              '<td>' +
-              fmtMoney(rowInv['Tax']) +
-              '</td>' +
-              '<td>' +
-              escapeHtml(rowInv['Invoice Date'] || '') +
-              '</td>' +
-              '<td>' +
-              escapeHtml(rowInv['Type'] || '') +
-              '</td>' +
-              '<td>' +
-              escapeHtml(rowInv['Due Date'] || '') +
-              '</td>';
-            tblSummary.appendChild(tr);
-          }
-        }
-      }
-
-      for (const s of aggregateShipments) {
-        const tr = document.createElement('tr');
-        tr.innerHTML =
-          '<td>' +
-          escapeHtml(s['Invoice Number'] || '') +
-          '</td>' +
-          '<td>' +
-          escapeHtml(s['Tracking Number'] || '') +
-          '</td>' +
-          '<td>' +
-          escapeHtml(s['Service Type'] || '') +
-          '</td>' +
-          '<td>' +
-          fmtMoney(s['Billed Charge']) +
-          '</td>' +
-          '<td>' +
-          escapeHtml(s['Order Date'] || '') +
-          '</td>' +
-          '<td>' +
-          escapeHtml(s['Destination Postal Code'] || '') +
-          '</td>' +
-          '<td>' +
-          escapeHtml(s['SO#'] || '') +
-          '</td>' +
-          '<td>' +
-          escapeHtml(s['PO#'] || '') +
-          '</td>';
-        tblShip.appendChild(tr);
-      }
-
-      if (warnAll.length) {
-        warnings.classList.add('visible');
-        warnAll.forEach((w) => {
-          const li = document.createElement('li');
-          li.textContent = w;
-          warnList.appendChild(li);
-        });
-      } else {
-        warnings.classList.remove('visible');
-      }
-
-      if (parsedCount > 0) {
-        summaryBar.classList.add('visible');
-        summaryBar.innerHTML =
-          '<strong>' +
-          parsedCount +
-          '</strong> invoice(s) processed · Total billed: <strong>' +
-          fmtMoney(totalBilled) +
-          '</strong> · Total tax: <strong>' +
-          fmtMoney(totalTax) +
-          '</strong>';
-        btnSummary.disabled = false;
-        btnDetail.disabled  = false;
-      } else {
-        summaryBar.classList.remove('visible');
-        btnSummary.disabled = true;
-        btnDetail.disabled  = true;
-      }
-    }
-
-    function escapeHtml(s) {
-      if (!s) return '';
-      const d = document.createElement('div');
-      d.textContent = s;
-      return d.innerHTML;
-    }
-
-    btnSummary.addEventListener('click', async () => {
-      if (!aggregateInvoices.length) return;
-      const filename = (nameSummary.value.trim() || 'invoice_summary');
-      try {
-        const res = await fetch('/api/export/summary', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            invoices: aggregateInvoices,
-            filename,
-          }),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          alert(err.error || 'Summary export failed');
-          return;
-        }
-        const blob = await res.blob();
-        const name = filename.endsWith('.xlsx') ? filename : filename + '.xlsx';
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = name;
-        a.click();
-        URL.revokeObjectURL(a.href);
-      } catch (e) {
-        alert('Export error: ' + e);
-      }
-    });
-
-    btnDetail.addEventListener('click', async () => {
-      if (!aggregateInvoices.length) return;
-      const filename = (nameDetail.value.trim() || 'invoice_detail');
-      try {
-        const res = await fetch('/api/export', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            invoices: aggregateInvoices,
-            shipments: aggregateShipments,
-            adjustments: aggregateAdjustments,
-            filename,
-          }),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          alert(err.error || 'Detail export failed');
-          return;
-        }
-        const blob = await res.blob();
-        const name = filename.endsWith('.xlsx') ? filename : filename + '.xlsx';
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = name;
-        a.click();
-        URL.revokeObjectURL(a.href);
-      } catch (e) {
-        alert('Export error: ' + e);
-      }
-    });
-
-    btnClear.addEventListener('click', resetUI);
-  </script>
+  // ── Clear ────────────────────────────────────────────────────────────────────
+  btnClear.addEventListener('click', () => {
+    pendingFiles = [];
+    parsedInvoices = [];
+    tbl.innerHTML = '';
+    warnList.innerHTML = '';
+    warns.classList.remove('on');
+    bar.classList.remove('on');
+    bar.innerHTML = '';
+    btnParse.disabled = true;
+    btnDl.disabled = true;
+  });
+</script>
 </body>
 </html>
