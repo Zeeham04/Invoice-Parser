@@ -95,9 +95,9 @@ _RE_ADJUSTMENTS = re.compile(
 
 # 4172AV brokerage charge lines (extracted from Summary section only — BUG-08)
 _RE_IMPORT_FREIGHT  = re.compile(r"^Import[ \t]+Freight[ \t]+([\d,]+\.\d{2})", re.I | re.M)
-# BUG-1: use ^\s* to tolerate leading indentation and \s+ to tolerate any whitespace.
-# 4172AV brokerage invoices have "Fuel Surcharge  49.25" (no $ sign, may be indented).
-_RE_FUEL_SURCHARGE  = re.compile(r"^\s*Fuel\s+Surcharge\s+([\d,]+\.\d{2})", re.I | re.M)
+# Fuel Surcharge: $ sign is optional — 4172AV brokerage invoices have bare numbers
+# ("Fuel Surcharge  49.25") while delivery invoices may have a $ prefix.
+_RE_FUEL_SURCHARGE  = re.compile(r"Fuel\s+Surcharge\s+\$?\s*([\d,]+\.\d{2})", re.I | re.M)
 _RE_PRINT_LABEL     = re.compile(r"^Print[ \t]+Label[ \t]+([\d,]+\.\d{2})", re.I | re.M)
 _RE_SURGE_FEE       = re.compile(r"Surge\s+Fee\s*[-–]\s*Com\s+([\d,]+\.\d{2})", re.I)
 _RE_GOVT_AGENCY_FEE = re.compile(r"Government\s+Agency\s+Fee\s+([\d,]+\.\d{2})", re.I)
@@ -378,12 +378,18 @@ def parse_invoice(source: Union[str, bytes, Path], filename: str = "") -> dict:
         # BUG-08 / BUG-11: extract charges from Summary of Charges section only.
         # Page 2 repeats the same labels for per-shipment detail; matching the
         # full text picks up those values instead of the page-1 totals.
+        # Extract from page-1 Summary of Charges section; falls back to full text
+        # if the section isolator does not find the heading.
         summary = _summary_section(text)
         discounts = _find_float(_RE_DISCOUNTS, summary)
-        # BUG-07: discounts are positive in the PDF, store as negative
         result["discounts_applied"]  = -discounts if discounts else 0.0
         result["import_freight"]     = _find_float(_RE_IMPORT_FREIGHT, summary)
-        result["fuel_surcharge"]     = _find_float(_RE_FUEL_SURCHARGE, summary)
+        # Fuel Surcharge: try summary section first, then full text.
+        # The section isolator occasionally clips the section before this line.
+        fuel = _find_float(_RE_FUEL_SURCHARGE, summary)
+        if fuel == 0.0:
+            fuel = _find_float(_RE_FUEL_SURCHARGE, text)
+        result["fuel_surcharge"]     = fuel
         result["print_label"]        = _find_float(_RE_PRINT_LABEL, summary)
         result["surge_fees"]         = _find_float(_RE_SURGE_FEE, summary)
         result["govt_agency_fee"]    = _find_float(_RE_GOVT_AGENCY_FEE, summary)

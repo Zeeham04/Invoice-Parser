@@ -131,25 +131,25 @@ def build_workbook(invoices: list[dict]) -> openpyxl.Workbook:
         ]
 
         for col, val in enumerate(row_vals, 1):
-            if col in T1_NUM_COLS and col != 7:
+            if col == 7:
+                # Subtotal must be an Excel formula string, never None or a float.
+                # Writing it directly inside the loop (not after) ensures a single
+                # unambiguous write with the correct data type.
+                formula = f"=J{r}-H{r}-I{r}"
+                print(f"Writing subtotal formula to G{r}: {formula}", flush=True)
+                c = ws.cell(row=r, column=col, value=formula)
+                c.font = _font()
+                c.fill = _no_fill()
+                c.border = _thin_border()
+                c.number_format = NUM
+                c.alignment = Alignment(horizontal="right", vertical="center")
+                print(f"G{r} cell value after write: {c.value!r}", flush=True)
+            elif col in T1_NUM_COLS:
                 _cell(ws, r, col, val, fmt=NUM, ha="right")
             elif col in (1, 4, 11):
-                # BUG-03: pass fmt=TXT directly into _cell so the @ format is
-                # applied in the same call that sets the value. Setting it
-                # afterwards risks Excel reinterpreting the value first.
                 _cell(ws, r, col, val, fmt=TXT, ha="left")
             else:
                 _cell(ws, r, col, val, ha="left")
-
-        # Column G — Subtotal: MUST be an Excel formula, never a computed float
-        print(f"Writing subtotal formula to G{r}: =J{r}-I{r}-H{r}", flush=True)
-        sc = ws.cell(row=r, column=7, value=f"=J{r}-I{r}-H{r}")
-        sc.font = _font()
-        sc.fill = _no_fill()
-        sc.border = _thin_border()
-        sc.number_format = NUM
-        sc.alignment = Alignment(horizontal="right", vertical="center")
-        print(f"G{r} cell value after write: {sc.value!r}", flush=True)
 
     T1_LAST_DATA  = T1_DATA_START + len(sorted_invs) - 1
     T1_TOTALS_ROW = T1_LAST_DATA + 1
