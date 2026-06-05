@@ -295,22 +295,11 @@ def _detect_format(text: str) -> str:
     return "delivery"
 
 
-# ── Main parse function ───────────────────────────────────────────────────────
+# ── Result scaffold ───────────────────────────────────────────────────────────
 
-def parse_invoice(source: Union[str, bytes, Path], filename: str = "") -> dict:
-    """
-    Parse any UPS invoice PDF and return a structured dict.
-
-    source  — file path (str / Path), raw bytes, or BytesIO.
-    filename — used in error messages when source is bytes.
-
-    Raises UPSParseError if the PDF cannot be parsed.
-    """
-    src_label = filename or (str(source) if isinstance(source, (str, Path)) else "PDF")
-    text = _extract_text(source)
-    fmt  = _detect_format(text)
-
-    result: dict = {
+def _base_result(fmt: str) -> dict:
+    """Return a result dict with every field defaulted to 0.0 / empty."""
+    return {
         "invoice_number":     "",
         "account_number":     "",
         "invoice_date":       "",
@@ -343,84 +332,139 @@ def parse_invoice(source: Union[str, bytes, Path], filename: str = "") -> dict:
         "pga_disclaim_fee":   0.0,
     }
 
-    if fmt == "delivery":
-        result["invoice_number"]     = _find(_RE_INV_NUM_DELIVERY, text)
-        result["account_number"]     = _find(_RE_ACCT_DELIVERY, text)
-        result["invoice_date"]       = _normalize_date(_find(_RE_DATE_INVOICE_D, text))
-        result["due_date"]           = _normalize_date(_find(_RE_DATE_DUE_D, text))
-        result["billed_amount"]      = _find_float(_RE_AMOUNT_DUE, text)
-        result["tax"]                = _extract_tax(text)
-        result["government_charges"] = 0.0  # delivery invoices never carry customs duties
-        result["invoice_type_label"] = "Domestic/Export"
 
-        incentive = _find_float(_RE_INCENTIVE, text)
-        # BUG-07: store discounts as negative
-        result["discounts_applied"]  = -incentive if incentive else 0.0
-        result["worldwide_service"]  = _find_float(_RE_WORLDWIDE, text)
-        result["campus_ship"]        = _find_float(_RE_CAMPUSSHIP, text)
-        result["ups_returns"]        = _find_float(_RE_RETURNS_D, text)
-        result["adjustments_other"]  = _find_float(_RE_ADJUSTMENTS, text)
-        result["service_charges"]    = 0.0
+# ── Format-specific parsers ───────────────────────────────────────────────────
+#
+# Each UPS invoice format has a different page layout, so each one gets its own
+# dedicated parser. The dispatcher (parse_invoice) picks the right one from the
+# account number + invoice title:
+#
+#   • Delivery Service Invoice  (account Y8A864) -> _parse_delivery
+#   • Customs Brokerage, 4172AV                  -> _parse_brokerage_4172av
+#   • Customs Brokerage, Y8A864                  -> _parse_brokerage_y8a864
+#
+# Keeping them separate means a layout quirk in one format can never corrupt the
+# extraction logic of another.
 
-    elif fmt == "brokerage_4172av":
-        result["invoice_number"]     = _find(_RE_INV_NUM_BROKERAGE, text)
-        result["account_number"]     = _find(_RE_ACCT_BROKERAGE, text)
-        result["invoice_date"]       = _normalize_date(_find(_RE_DATE_INVOICE_B, text))
-        result["due_date"]           = _normalize_date(_find(_RE_DATE_DUE_B, text))
-        result["billed_amount"]      = _find_float(_RE_NET_PAYABLE, text)
-        result["tax"]                = 0.0
-        # BUG-02: government_charges is ALWAYS 0 for 4172AV.
-        # The PDF shows "Total Government Charges X.XX" but this is GST on
-        # brokerage fees, not import duties. It belongs in brokerage_gst only.
-        result["government_charges"] = 0.0
-        result["invoice_type_label"] = "Import"
+def _parse_delivery(text: str) -> dict:
+    """UPS Delivery Service Invoice (domestic/export shipping, account Y8A864)."""
+    r = _base_result("delivery")
+    r["invoice_number"]     = _find(_RE_INV_NUM_DELIVERY, text)
+    r["account_number"]     = _find(_RE_ACCT_DELIVERY, text)
+    r["invoice_date"]       = _normalize_date(_find(_RE_DATE_INVOICE_D, text))
+    r["due_date"]           = _normalize_date(_find(_RE_DATE_DUE_D, text))
+    r["billed_amount"]      = _find_float(_RE_AMOUNT_DUE, text)
+    r["tax"]                = _extract_tax(text)
+    r["government_charges"] = 0.0  # delivery invoices never carry customs duties
+    r["invoice_type_label"] = "Domestic/Export"
 
-        # BUG-08 / BUG-11: extract charges from Summary of Charges section only.
-        # Page 2 repeats the same labels for per-shipment detail; matching the
-        # full text picks up those values instead of the page-1 totals.
-        # Extract from page-1 Summary of Charges section; falls back to full text
-        # if the section isolator does not find the heading.
-        summary = _summary_section(text)
-        discounts = _find_float(_RE_DISCOUNTS, summary)
-        result["discounts_applied"]  = -discounts if discounts else 0.0
-        result["import_freight"]     = _find_float(_RE_IMPORT_FREIGHT, summary)
-        # Fuel Surcharge: try summary section first, then full text.
-        # The section isolator occasionally clips the section before this line.
-        fuel = _find_float(_RE_FUEL_SURCHARGE, summary)
-        if fuel == 0.0:
-            fuel = _find_float(_RE_FUEL_SURCHARGE, text)
-        result["fuel_surcharge"]     = fuel
-        result["print_label"]        = _find_float(_RE_PRINT_LABEL, summary)
-        result["surge_fees"]         = _find_float(_RE_SURGE_FEE, summary)
-        result["govt_agency_fee"]    = _find_float(_RE_GOVT_AGENCY_FEE, summary)
-        result["tariff_line_fee"]    = _find_float(_RE_TARIFF_LINE_FEE, summary)
-        result["brokerage_gst"]      = _find_float(_RE_BROKERAGE_GST, summary)
+    incentive = _find_float(_RE_INCENTIVE, text)
+    r["discounts_applied"]  = -incentive if incentive else 0.0  # stored negative
+    r["worldwide_service"]  = _find_float(_RE_WORLDWIDE, text)
+    r["campus_ship"]        = _find_float(_RE_CAMPUSSHIP, text)
+    r["ups_returns"]        = _find_float(_RE_RETURNS_D, text)
+    r["adjustments_other"]  = _find_float(_RE_ADJUSTMENTS, text)
+    r["service_charges"]    = 0.0
+    return r
 
-    elif fmt == "brokerage_y8a864":
-        result["invoice_number"]     = _find(_RE_INV_NUM_BROKERAGE, text)
-        result["account_number"]     = _find(_RE_ACCT_BROKERAGE, text)
-        result["invoice_date"]       = _normalize_date(_find(_RE_DATE_INVOICE_B, text))
-        result["due_date"]           = _normalize_date(_find(_RE_DATE_DUE_B, text))
-        result["billed_amount"]      = _find_float(_RE_NET_PAYABLE, text)
-        result["tax"]                = 0.0
-        result["invoice_type_label"] = "Import"
-        result["discounts_applied"]  = 0.0
 
-        # Government Charges: real customs duty, value may wrap to next line (BUG from prev sessions)
-        result["government_charges"] = _find_multiline_float("Government Charges", text)
+def _parse_brokerage_4172av(text: str) -> dict:
+    """
+    UPS Customs Brokerage Invoice, account 4172AV.
 
-        # BUG-11: strip the Customs CAD Calculations block before extracting UPS fees.
-        # That block contains CBSA tariff breakdown rows (e.g. $2.00 CBSA charge on
-        # invoice 5732658528) which are not UPS charges and must not land in any column.
-        ups_text = _strip_customs_cad(text)
-        result["tariff_line_fee"]    = _find_float(_RE_TARIFF_LINE_FEE, ups_text)
-        result["duty_us"]            = _find_float(_RE_DUTY, ups_text)
-        result["merch_proc_fee"]     = _find_float(_RE_MERCH_PROC, ups_text)
-        result["disbursement_fee"]   = _find_float(_RE_DISBURSEMENT, ups_text)
-        result["entry_prep_fee"]     = _find_float(_RE_ENTRY_PREP, ups_text)
-        result["pga_disclaim_fee"]   = _find_float(_RE_PGA_DISCLAIM, ups_text)
+    These carry only brokerage/shipping charges (no import duties): government
+    charges are always 0. Any GST/HST shown is brokerage GST, which is a tax —
+    it is reported both in the Tax column and the Brokerage GST/HST column.
+    """
+    r = _base_result("brokerage_4172av")
+    r["invoice_number"]     = _find(_RE_INV_NUM_BROKERAGE, text)
+    r["account_number"]     = _find(_RE_ACCT_BROKERAGE, text)
+    r["invoice_date"]       = _normalize_date(_find(_RE_DATE_INVOICE_B, text))
+    r["due_date"]           = _normalize_date(_find(_RE_DATE_DUE_B, text))
+    r["billed_amount"]      = _find_float(_RE_NET_PAYABLE, text)
+    r["government_charges"] = 0.0  # 4172AV never carries customs duties
+    r["invoice_type_label"] = "Import"
 
-    # BUG-03: invoice_number must always be a plain string — never cast to int.
+    # Extract charges from the page-1 Summary of Charges section only; page-2
+    # repeats the same labels with per-shipment values. Fall back to full text
+    # if the section heading is not found.
+    summary = _summary_section(text)
+    discounts = _find_float(_RE_DISCOUNTS, summary)
+    r["discounts_applied"]  = -discounts if discounts else 0.0
+    r["import_freight"]     = _find_float(_RE_IMPORT_FREIGHT, summary)
+    fuel = _find_float(_RE_FUEL_SURCHARGE, summary)
+    if fuel == 0.0:
+        fuel = _find_float(_RE_FUEL_SURCHARGE, text)
+    r["fuel_surcharge"]     = fuel
+    r["print_label"]        = _find_float(_RE_PRINT_LABEL, summary)
+    r["surge_fees"]         = _find_float(_RE_SURGE_FEE, summary)
+    r["govt_agency_fee"]    = _find_float(_RE_GOVT_AGENCY_FEE, summary)
+    r["tariff_line_fee"]    = _find_float(_RE_TARIFF_LINE_FEE, summary)
+    r["brokerage_gst"]      = _find_float(_RE_BROKERAGE_GST, summary)
+    # Brokerage GST/HST is a tax, so surface it in the Tax column too.
+    r["tax"]                = r["brokerage_gst"]
+    return r
+
+
+def _parse_brokerage_y8a864(text: str) -> dict:
+    """
+    UPS Customs Brokerage Invoice, account Y8A864.
+
+    These DO carry real import duties paid to CBSA (Government Charges) plus a
+    detailed UPS customs-fee breakdown (duty, MPF, disbursement, entry prep, …).
+    """
+    r = _base_result("brokerage_y8a864")
+    r["invoice_number"]     = _find(_RE_INV_NUM_BROKERAGE, text)
+    r["account_number"]     = _find(_RE_ACCT_BROKERAGE, text)
+    r["invoice_date"]       = _normalize_date(_find(_RE_DATE_INVOICE_B, text))
+    r["due_date"]           = _normalize_date(_find(_RE_DATE_DUE_B, text))
+    r["billed_amount"]      = _find_float(_RE_NET_PAYABLE, text)
+    r["tax"]                = 0.0
+    r["invoice_type_label"] = "Import"
+
+    # Government Charges: real customs duty; the value may wrap to the next line.
+    r["government_charges"] = _find_multiline_float("Government Charges", text)
+
+    # Strip the Customs CAD Calculations block (CBSA tariff breakdown rows that
+    # are not UPS charges) before extracting the UPS customs fees.
+    ups_text = _strip_customs_cad(text)
+    r["tariff_line_fee"]    = _find_float(_RE_TARIFF_LINE_FEE, ups_text)
+    r["duty_us"]            = _find_float(_RE_DUTY, ups_text)
+    r["merch_proc_fee"]     = _find_float(_RE_MERCH_PROC, ups_text)
+    r["disbursement_fee"]   = _find_float(_RE_DISBURSEMENT, ups_text)
+    r["entry_prep_fee"]     = _find_float(_RE_ENTRY_PREP, ups_text)
+    r["pga_disclaim_fee"]   = _find_float(_RE_PGA_DISCLAIM, ups_text)
+    return r
+
+
+_FORMAT_PARSERS = {
+    "delivery":          _parse_delivery,
+    "brokerage_4172av":  _parse_brokerage_4172av,
+    "brokerage_y8a864":  _parse_brokerage_y8a864,
+}
+
+
+# ── Main parse function ───────────────────────────────────────────────────────
+
+def parse_invoice(source: Union[str, bytes, Path], filename: str = "") -> dict:
+    """
+    Parse any UPS invoice PDF and return a structured dict.
+
+    source  — file path (str / Path), raw bytes, or BytesIO.
+    filename — used in error messages when source is bytes.
+
+    The PDF format is detected from its account number + invoice title, then the
+    matching format-specific parser is dispatched.
+
+    Raises UPSParseError if the PDF cannot be parsed.
+    """
+    src_label = filename or (str(source) if isinstance(source, (str, Path)) else "PDF")
+    text = _extract_text(source)
+    fmt  = _detect_format(text)
+
+    result = _FORMAT_PARSERS[fmt](text)
+
+    # invoice_number must always be a plain string — never cast to int.
     result["invoice_number"] = str(result["invoice_number"])
 
     # Validate required fields
