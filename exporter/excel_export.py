@@ -59,20 +59,13 @@ TXT = "@"
 
 # ── Sort key ──────────────────────────────────────────────────────────────────
 
-_ACCOUNT_ORDER = {"4172AV": 0, "Y8A864": 1}
-
-
 def _sort_key(inv: dict):
-    """4172AV group first (date asc), then Y8A864 group (date asc)."""
-    acct_rank = _ACCOUNT_ORDER.get(str(inv.get("account_number", "")).upper(), 99)
+    """Sort all invoices by invoice date ascending, regardless of account."""
     raw_date = inv.get("invoice_date", "")
-    # BUG-10: %d in strptime already accepts both "3" and "03" on all platforms.
-    # The %-d specifier is Linux-only and raises ValueError on Windows — removed.
     try:
-        dt = datetime.strptime(raw_date, "%B %d, %Y")
+        return datetime.strptime(raw_date, "%B %d, %Y")
     except ValueError:
-        dt = datetime.min
-    return (acct_rank, dt)
+        return datetime.min
 
 
 def _safe(inv: dict, key: str, default: Any = 0.0) -> Any:

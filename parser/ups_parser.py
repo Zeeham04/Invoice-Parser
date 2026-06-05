@@ -95,7 +95,9 @@ _RE_ADJUSTMENTS = re.compile(
 
 # 4172AV brokerage charge lines (extracted from Summary section only — BUG-08)
 _RE_IMPORT_FREIGHT  = re.compile(r"^Import[ \t]+Freight[ \t]+([\d,]+\.\d{2})", re.I | re.M)
-_RE_FUEL_SURCHARGE  = re.compile(r"^Fuel[ \t]+Surcharge[ \t]+([\d,]+\.\d{2})", re.I | re.M)
+# BUG-1: use ^\s* to tolerate leading indentation and \s+ to tolerate any whitespace.
+# 4172AV brokerage invoices have "Fuel Surcharge  49.25" (no $ sign, may be indented).
+_RE_FUEL_SURCHARGE  = re.compile(r"^\s*Fuel\s+Surcharge\s+([\d,]+\.\d{2})", re.I | re.M)
 _RE_PRINT_LABEL     = re.compile(r"^Print[ \t]+Label[ \t]+([\d,]+\.\d{2})", re.I | re.M)
 _RE_SURGE_FEE       = re.compile(r"Surge\s+Fee\s*[-–]\s*Com\s+([\d,]+\.\d{2})", re.I)
 _RE_GOVT_AGENCY_FEE = re.compile(r"Government\s+Agency\s+Fee\s+([\d,]+\.\d{2})", re.I)
