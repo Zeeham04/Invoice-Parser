@@ -66,14 +66,12 @@ def _sort_key(inv: dict):
     """4172AV group first (date asc), then Y8A864 group (date asc)."""
     acct_rank = _ACCOUNT_ORDER.get(str(inv.get("account_number", "")).upper(), 99)
     raw_date = inv.get("invoice_date", "")
+    # BUG-10: %d in strptime already accepts both "3" and "03" on all platforms.
+    # The %-d specifier is Linux-only and raises ValueError on Windows — removed.
     try:
         dt = datetime.strptime(raw_date, "%B %d, %Y")
     except ValueError:
-        try:
-            # Try without zero-padded day: "January 3, 2026"
-            dt = datetime.strptime(raw_date, "%B %-d, %Y")
-        except ValueError:
-            dt = datetime.min
+        dt = datetime.min
     return (acct_rank, dt)
 
 
@@ -89,6 +87,7 @@ def build_workbook(invoices: list[dict]) -> openpyxl.Workbook:
     Build and return the summary workbook.
 
     Accepts invoices in the snake_case format from parse_invoice().
+    
     """
     if not invoices:
         raise ValueError("No invoices to export")
@@ -141,9 +140,11 @@ def build_workbook(invoices: list[dict]) -> openpyxl.Workbook:
         for col, val in enumerate(row_vals, 1):
             if col in T1_NUM_COLS and col != 7:
                 _cell(ws, r, col, val, fmt=NUM, ha="right")
-            elif col in (1, 4, 11):  # text columns — force string format
-                c = _cell(ws, r, col, val, ha="left")
-                c.number_format = TXT
+            elif col in (1, 4, 11):
+                # BUG-03: pass fmt=TXT directly into _cell so the @ format is
+                # applied in the same call that sets the value. Setting it
+                # afterwards risks Excel reinterpreting the value first.
+                _cell(ws, r, col, val, fmt=TXT, ha="left")
             else:
                 _cell(ws, r, col, val, ha="left")
 
@@ -237,8 +238,8 @@ def build_workbook(invoices: list[dict]) -> openpyxl.Workbook:
         r = T2_DATA_START + row_offset
         ws.row_dimensions[r].height = 15
 
-        c = _cell(ws, r, 1, str(_safe(inv, "invoice_number", "")), ha="left")
-        c.number_format = TXT
+        # BUG-03: fmt=TXT passed inline so @ format is set with the value in one step
+        _cell(ws, r, 1, str(_safe(inv, "invoice_number", "")), fmt=TXT, ha="left")
         _cell(ws, r, 2, _safe(inv, "account_number", ""), ha="left")
 
         for col_offset, key in enumerate(T2_CHARGE_KEYS):
