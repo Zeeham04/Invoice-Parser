@@ -45,6 +45,16 @@
     button.primary:disabled { opacity: 0.4; cursor: not-allowed; }
     button.ghost:hover { background: #f3f4f6; }
 
+    /* Filename input */
+    .name-field { display: flex; align-items: center; gap: 6px; }
+    .name-field input {
+      font: inherit; font-size: 0.95rem;
+      padding: 10px 12px; border-radius: 8px;
+      border: 1px solid #c0c8d0; width: 260px;
+    }
+    .name-field input:focus { outline: none; border-color: #1a5fd6; }
+    .name-field .ext { color: #888; font-size: 0.9rem; }
+
     /* Spinner */
     .progress { display: none; align-items: center; gap: 10px; color: #666; margin-top: 14px; font-size: 0.9rem; }
     .progress.on { display: flex; }
@@ -92,7 +102,11 @@
 
   <div class="toolbar">
     <button class="primary" id="btnParse" disabled>Parse &amp; Export</button>
-    <button class="primary" id="btnDl" disabled>⬇ Download Summary (.xlsx)</button>
+    <span class="name-field">
+      <input type="text" id="fileName" placeholder="File name" />
+      <span class="ext">.xlsx</span>
+    </span>
+    <button class="primary" id="btnDl" disabled>⬇ Download Summary</button>
     <button class="ghost"   id="btnClear">Clear</button>
   </div>
 
@@ -131,6 +145,10 @@
   const warns    = document.getElementById('warns');
   const warnList = document.getElementById('warnList');
   const tbl      = document.getElementById('tbl');
+  const fileName = document.getElementById('fileName');
+
+  const defaultName = () => `UPS_Invoice_Summary_${new Date().toISOString().slice(0,10)}`;
+  fileName.value = defaultName();
 
   let pendingFiles  = [];   // File[] waiting to be parsed
   let parsedInvoices = [];  // invoice dicts from successful parses
@@ -248,11 +266,17 @@
   // ── Download ─────────────────────────────────────────────────────────────────
   btnDl.addEventListener('click', async () => {
     if (!parsedInvoices.length) return;
+
+    // Sanitize the chosen name; fall back to the default if left blank.
+    let name = (fileName.value || '').trim();
+    if (!name) name = defaultName();
+    name = name.replace(/[\\/:*?"<>|]/g, '_').replace(/\.xlsx$/i, '');
+
     try {
       const res = await fetch('/api/export/summary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ invoices: parsedInvoices }),
+        body: JSON.stringify({ invoices: parsedInvoices, filename: name }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -262,7 +286,7 @@
       const blob = await res.blob();
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `UPS_Invoice_Summary_${new Date().toISOString().slice(0,10)}.xlsx`;
+      a.download = `${name}.xlsx`;
       a.click();
       URL.revokeObjectURL(a.href);
     } catch (e) {
@@ -281,6 +305,7 @@
     bar.innerHTML = '';
     btnParse.disabled = true;
     btnDl.disabled = true;
+    fileName.value = defaultName();
   });
 </script>
 </body>
