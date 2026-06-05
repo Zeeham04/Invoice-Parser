@@ -11,6 +11,7 @@ from typing import Any
 import pdfplumber
 
 from .base_parser import ParseResult
+from .party_columns import extract_party_blocks
 from .ups_domestic import UPSDomesticParser
 from .ups_import import UPSImportTypeBParser, UPSImportTypeCParser, is_type_b
 
@@ -181,6 +182,19 @@ def parse_pdf_bytes(data: bytes, filename: str) -> dict[str, Any]:
         invoices_out.append(result.invoice)
         shipments_out.extend(result.shipments)
         adjustments_out.extend(result.adjustments)
+
+    # Fill Sender/Receiver/City using coordinate-based column splitting (domestic
+    # invoices place the two parties in side-by-side columns that the flattened
+    # text cannot separate).
+    party_blocks = extract_party_blocks(data)
+    if party_blocks:
+        for ship in shipments_out:
+            info = party_blocks.get(ship.get("Tracking Number", ""))
+            if not info:
+                continue
+            for key, value in info.items():
+                if value and not ship.get(key):
+                    ship[key] = value
 
     unique_kinds = set(kinds_seen)
     if len(unique_kinds) > 1:

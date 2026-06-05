@@ -53,6 +53,32 @@ def _find_so_po(text: str) -> tuple[str, str]:
     return so, po
 
 
+# ── Sender / receiver block parsing ────────────────────────────────────────────
+
+# "CITY PROV  A1A1A1" (Canadian) or "CITY PROV  99999[-9999]" (US)
+_CITY_RE = re.compile(
+    r"^(.*?)[ ,]+([A-Z]{2})\s+(?:[A-Z]\d[A-Z]\s?\d[A-Z]\d|\d{5}(?:-\d{4})?)\s*$"
+)
+
+_PARTY_STOP_RE = re.compile(
+    r"^(message codes|total\b|shaded area|customer entered|billable|audited"
+    r"|converted|dimensions|1st ref|2nd ref|userid|1z[a-z0-9]{16}"
+    r"|packages?\b|surge fee|fuel surcharge|declared value|additional handling"
+    r"|demand surcharge|residential surcharge|delivery area|electronic label"
+    r"|customer weight)",
+    re.IGNORECASE,
+)
+
+
+def _extract_city(line: str) -> str:
+    """Return 'CITY PROV' from an address line ending in a postal/ZIP code, else ''."""
+    m = _CITY_RE.match(line.strip())
+    if not m:
+        return ""
+    city = m.group(1).strip().rstrip(",").strip()
+    return f"{city} {m.group(2)}".strip()
+
+
 # ── Tax extraction ─────────────────────────────────────────────────────────────
 
 def _extract_total_tax(text: str) -> float | None:
@@ -250,7 +276,7 @@ class UPSDomesticParser(BaseInvoiceParser):
             "Account Number": account,
             "Amount Due": billed,
             "Invoice Date": inv_date,
-            "Invoice Status": "Open",
+            "Invoice Status": "",
             "Payment Status": "",
             "Subtotal": subtotal,
             "Tax": tax,
@@ -337,20 +363,20 @@ class UPSDomesticParser(BaseInvoiceParser):
                 "UserID": "",
             }
 
-            got_sender = False
-            got_co = False
+            # Collect this shipment's detail lines (up to the next primary line)
+            block: list[str] = []
             for fwd_pos in range(pos + 1, len(section)):
                 _, fwd = section[fwd_pos]
-
                 if _PRIMARY_LINE.match(fwd):
                     break
+                block.append(fwd)
 
+            def last_num(s: str) -> float | None:
+                nums = re.findall(r"([\d,]+\.\d{2})", s)
+                return _f(nums[-1]) if nums else None
+
+            for fwd in block:
                 lo = fwd.lower().strip()
-
-                def last_num(s: str) -> float | None:
-                    nums = re.findall(r"([\d,]+\.\d{2})", s)
-                    return _f(nums[-1]) if nums else None
-
                 if lo.startswith("fuel surcharge"):
                     row["Fuel Surcharge"] = last_num(fwd)
                 elif lo.startswith("declared value"):
@@ -376,34 +402,11 @@ class UPSDomesticParser(BaseInvoiceParser):
                     u = re.search(r"UserID\s*:?\s*(\S+)", fwd, re.I)
                     if u:
                         row["UserID"] = u.group(1)
-                elif re.search(r"\bSender\b", fwd, re.I) and re.search(
-                    r"\bReceiver\b", fwd, re.I
-                ):
-                    snd_m = re.search(
-                        r"Sender\s*:?\s*(.+?)(?:\s{2,}|\bReceiver\b)", fwd, re.I
-                    )
-                    rcv_m = re.search(r"Receiver\s*:?\s*(.+)$", fwd, re.I)
-                    if snd_m:
-                        row["Sender Name"] = snd_m.group(1).strip()[:80]
-                    if rcv_m:
-                        row["Receiver Name"] = rcv_m.group(1).strip()[:80]
-                    got_sender = True
-                elif got_sender and not got_co:
-                    parts = re.split(r"\s{3,}", fwd.strip())
-                    if len(parts) >= 2:
-                        row["Sender Company"] = parts[0].strip()[:80]
-                        row["Receiver Company"] = parts[-1].strip()[:80]
-                    elif len(parts) == 1 and parts[0]:
-                        row["Receiver Company"] = parts[0].strip()[:80]
-                    got_co = True
-                elif got_co and not row["Receiver City/Province"]:
-                    cp_m = re.search(
-                        r"([A-Z][A-Za-zÀ-ÿ\s\-]+(?:[A-Z]{2})\s+[A-Z]\d[A-Z]\s?\d[A-Z]\d)",
-                        fwd,
-                    )
-                    if cp_m:
-                        row["Receiver City/Province"] = cp_m.group(1).strip()[:60]
 
+            # Sender/Receiver/City are filled later by the coordinate-based
+            # enrichment pass (see parser.party_columns) because pdfplumber joins
+            # the two side-by-side address columns with single spaces, which can't
+            # be split reliably from the flattened text alone.
             results.append(row)
 
         return results

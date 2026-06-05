@@ -32,25 +32,25 @@ def _extract_import_header(text: str) -> dict[str, str]:
     """Extract invoice-level header fields common to TYPE_B and TYPE_C."""
     flat = re.sub(r"\s+", " ", text)
 
-    # Invoice number — handle "Invoice No.: 123456" inline or next-line
+    # Invoice number — require a numeric value so the columnar layout (where the
+    # label "Invoice No.:" is immediately followed by the next label "Control ID:")
+    # is skipped and we lock onto the clean remittance line "Invoice No. 5728196240".
     inv_no = ""
-    m = re.search(r"Invoice\s+No\.?\s*:?\s*\n?\s*(\S+)", text, re.I)
+    m = re.search(r"Invoice\s+No\.?\s*:?\s*\n?\s*([0-9]{6,})", text, re.I)
+    if not m:
+        m = re.search(r"Invoice\s+No\.?\s*:?\s*([0-9]{6,})", flat, re.I)
     if m:
         inv_no = str(m.group(1)).strip()
-    if not inv_no:
-        m = re.search(r"Invoice\s+No\.?\s*:?\s*([A-Z0-9]{6,})", flat, re.I)
-        if m:
-            inv_no = str(m.group(1)).strip()
 
-    # Account number
+    # Account number — require a token that contains a digit (e.g. "4172AV"),
+    # which excludes the next label word "Invoice" in the columnar layout and the
+    # "Bank Account Number" remittance field.
     account = ""
-    m = re.search(r"Account\s+No\.?\s*:?\s*\n?\s*(\S+)", text, re.I)
+    m = re.search(r"Account\s+No\.?\s*:?\s*\n?\s*([A-Z0-9]*\d[A-Z0-9]*)", text, re.I)
+    if not m:
+        m = re.search(r"Account\s+No\.?\s*:?\s*([A-Z0-9]*\d[A-Z0-9]*)", flat, re.I)
     if m:
         account = m.group(1).strip()
-    if not account:
-        m = re.search(r"Account\s+No\.?\s*:?\s*([A-Z0-9]{4,12})", flat, re.I)
-        if m:
-            account = m.group(1).strip()
 
     # Invoice date
     inv_date = ""
@@ -61,12 +61,20 @@ def _extract_import_header(text: str) -> dict[str, str]:
     if m:
         inv_date = _norm_date(m.group(1).strip())
 
-    # Due date — TYPE_B uses "Date Due:", TYPE_C may use "Invoice Due Date:"
+    # Due date — prefer the clean "Invoice Due Date <date>" remittance line.
+    # The bare "Date Due:" label sits directly above the value column, so a
+    # leftmost combined search would wrongly grab the invoice-date value; try the
+    # unambiguous "Invoice Due Date" label first, then fall back to "Date Due".
     due_date = ""
     m = re.search(
-        r"(?:Date\s+Due|Invoice\s+Due\s+Date)\s*:?\s*\n?\s*([A-Za-z]+ \d{1,2},?\s*\d{4})",
+        r"Invoice\s+Due\s+Date\s*:?\s*\n?\s*([A-Za-z]+ \d{1,2},?\s*\d{4})",
         text, re.I,
     )
+    if not m:
+        m = re.search(
+            r"Date\s+Due\s*:?\s*\n?\s*([A-Za-z]+ \d{1,2},?\s*\d{4})",
+            text, re.I,
+        )
     if m:
         due_date = _norm_date(m.group(1).strip())
 
@@ -289,7 +297,7 @@ class UPSImportTypeBParser(BaseInvoiceParser):
             "Account Number": account,
             "Amount Due": billed,
             "Invoice Date": inv_date,
-            "Invoice Status": "Open",
+            "Invoice Status": "",
             "Payment Status": "",
             "Subtotal": subtotal,
             "Tax": tax,
@@ -331,6 +339,10 @@ class UPSImportTypeCParser(BaseInvoiceParser):
 
         hdr = _extract_import_header(text)
         inv_no = hdr["inv_no"]
+        # Pad numeric customs invoice numbers to 15 digits to match reference format
+        # (e.g. 5728196240 -> 000005728196240).
+        if inv_no.isdigit() and len(inv_no) < 15:
+            inv_no = inv_no.zfill(15)
         account = hdr["account"]
         inv_date = hdr["inv_date"]
         due_date = hdr["due_date"]
@@ -368,7 +380,7 @@ class UPSImportTypeCParser(BaseInvoiceParser):
             "Account Number": account,
             "Amount Due": billed,
             "Invoice Date": inv_date,
-            "Invoice Status": "Open",
+            "Invoice Status": "",
             "Payment Status": "",
             "Subtotal": subtotal,
             "Tax": tax,
