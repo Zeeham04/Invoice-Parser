@@ -132,18 +132,13 @@ def build_workbook(invoices: list[dict]) -> openpyxl.Workbook:
 
         for col, val in enumerate(row_vals, 1):
             if col == 7:
-                # Subtotal must be an Excel formula string, never None or a float.
-                # Writing it directly inside the loop (not after) ensures a single
-                # unambiguous write with the correct data type.
-                formula = f"=J{r}-H{r}-I{r}"
-                print(f"Writing subtotal formula to G{r}: {formula}", flush=True)
-                c = ws.cell(row=r, column=col, value=formula)
-                c.font = _font()
-                c.fill = _no_fill()
-                c.border = _thin_border()
-                c.number_format = NUM
-                c.alignment = Alignment(horizontal="right", vertical="center")
-                print(f"G{r} cell value after write: {c.value!r}", flush=True)
+                # Subtotal = Billed − Tax − Government Charges. Written as a literal
+                # computed value (not an Excel formula) so it displays correctly in
+                # every viewer, matching the handmade reference exactly.
+                billed = float(_safe(inv, "billed_amount", 0.0) or 0.0)
+                tax = float(_safe(inv, "tax", 0.0) or 0.0)
+                govt = float(_safe(inv, "government_charges", 0.0) or 0.0)
+                _cell(ws, r, col, round(billed - tax - govt, 2), fmt=NUM, ha="right")
             elif col in T1_NUM_COLS:
                 _cell(ws, r, col, val, fmt=NUM, ha="right")
             elif col in (1, 4, 11):
@@ -154,11 +149,26 @@ def build_workbook(invoices: list[dict]) -> openpyxl.Workbook:
     T1_LAST_DATA  = T1_DATA_START + len(sorted_invs) - 1
     T1_TOTALS_ROW = T1_LAST_DATA + 1
     ws.row_dimensions[T1_TOTALS_ROW].height = 15
+
+    def _col_total(col: int) -> float:
+        total = 0.0
+        for inv in sorted_invs:
+            billed = float(_safe(inv, "billed_amount", 0.0) or 0.0)
+            tax = float(_safe(inv, "tax", 0.0) or 0.0)
+            govt = float(_safe(inv, "government_charges", 0.0) or 0.0)
+            if col == 7:
+                total += round(billed - tax - govt, 2)
+            elif col == 8:
+                total += tax
+            elif col == 9:
+                total += govt
+            elif col == 10:
+                total += billed
+        return round(total, 2)
+
     for col in range(1, 13):
         if col in T1_NUM_COLS:
-            cl = get_column_letter(col)
-            _cell(ws, T1_TOTALS_ROW, col,
-                  f"=SUM({cl}{T1_DATA_START}:{cl}{T1_LAST_DATA})",
+            _cell(ws, T1_TOTALS_ROW, col, _col_total(col),
                   bold=True, fill=_grey_fill(), ha="right", fmt=NUM)
         else:
             c = ws.cell(row=T1_TOTALS_ROW, column=col, value="")
@@ -246,9 +256,14 @@ def build_workbook(invoices: list[dict]) -> openpyxl.Workbook:
     ws.row_dimensions[T2_TOTALS_ROW].height = 15
     for col in range(1, 22):
         if col >= 3:
-            cl = get_column_letter(col)
-            _cell(ws, T2_TOTALS_ROW, col,
-                  f"=SUM({cl}{T2_DATA_START}:{cl}{T2_LAST_DATA})",
+            if col == 21:
+                total = sum(
+                    float(_safe(i, "billed_amount", 0.0) or 0.0) for i in sorted_invs
+                )
+            else:
+                key = T2_CHARGE_KEYS[col - 3]
+                total = sum(float(_safe(i, key, 0.0) or 0.0) for i in sorted_invs)
+            _cell(ws, T2_TOTALS_ROW, col, round(total, 2),
                   bold=True, fill=_grey_fill(), ha="right", fmt=NUM)
         else:
             c = ws.cell(row=T2_TOTALS_ROW, column=col, value="")

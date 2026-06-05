@@ -239,7 +239,7 @@ def _normalize_date(raw: str) -> str:
 
 
 def _extract_tax(text: str) -> float:
-    """
+    r"""
     BUG-01: Extract the grand-total tax from a delivery invoice.
 
     The tax section has three kinds of lines:
